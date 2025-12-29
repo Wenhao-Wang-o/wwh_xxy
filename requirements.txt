@@ -3,4 +3,5 @@ pandas
 plotly
 openai
 st-supabase-connection
+supabase
 requests
