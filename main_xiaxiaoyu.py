@@ -5,7 +5,6 @@ from openai import OpenAI
 import datetime
 import numpy as np
 import requests
-import base64
 from supabase import create_client, Client
 
 # --- 0. 核心配置 ---
@@ -35,22 +34,13 @@ def delete_record(table_name, record_id):
     st.rerun()
 
 # --- 2. 工具函数 ---
-def analyze_food_with_gemini(uploaded_file, g_key):
-    """使用原生请求识别图片（不留痕）"""
-    if not g_key: return "请在侧边栏填入 Gemini Key"
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={g_key}"
-    img_b64 = base64.b64encode(uploaded_file.getvalue()).decode('utf-8')
-    payload = {
-        "contents": [{"parts": [
-            {"text": "识别图片食物，估算热量和纤维素（对排便很重要），给出温柔建议。"},
-            {"inline_data": {"mime_type": "image/jpeg", "data": img_b64}}
-        ]}]
-    }
+def get_weather(city_pinyin):
+    api_key = "3f4ff1ded1a1a5fc5335073e8cf6f722"
+    url = f"http://api.openweathermap.org/data/2.5/weather?q={city_pinyin}&appid={api_key}&units=metric&lang=zh_cn"
     try:
-        response = requests.post(url, json=payload, timeout=15)
-        res_json = response.json()
-        return res_json["candidates"][0]["content"]["parts"][0]["text"]
-    except: return "识别暂时不可用，请检查网络或Key。"
+        res = requests.get(url, timeout=3).json()
+        return {"temp": res['main']['temp'], "icon": res['weather'][0]['icon']}
+    except: return None
 
 def get_prediction(df):
     if len(df) < 2: return None, 0
@@ -80,9 +70,13 @@ with st.sidebar:
     st.divider()
     days_left = (datetime.date(2026, 6, 23) - datetime.date.today()).days
     st.metric("距离重逢", f"{days_left} 天")
+    st.progress(max(0, min(100, 100 - int(days_left / 540 * 100))))
     st.divider()
-    deepseek_key = st.text_input("🔑 DeepSeek Key (审计)", value=DEFAULT_API_KEY, type="password")
-    gemini_key = st.text_input("🔑 Gemini Key (识食)", type="password")
+    w_tokyo, w_shantou = get_weather("Tokyo"), get_weather("Shantou")
+    c1, c2 = st.columns(2)
+    if w_tokyo: c1.markdown(f"<div style='text-align:center;'><img src='http://openweathermap.org/img/wn/{w_tokyo['icon']}.png' width='40'><br>东京 {w_tokyo['temp']}°C</div>", unsafe_allow_html=True)
+    if w_shantou: c2.markdown(f"<div style='text-align:center;'><img src='http://openweathermap.org/img/wn/{w_shantou['icon']}.png' width='40'><br>汕头 {w_shantou['temp']}°C</div>", unsafe_allow_html=True)
+    api_key_input = st.text_input("🔑 API 秘钥", value=DEFAULT_API_KEY, type="password")
 
 load_all_data(current_user)
 
@@ -95,73 +89,106 @@ tab1, tab2, tab3, tab4 = st.tabs(["🌸 时光机", "📉 减脂美学", "🎒 �
 with tab1:
     col_l, col_r = st.columns([1.8, 1.2])
     with col_l:
-        # 小夏专属识食
-        if current_user == "小夏":
-            st.markdown("#### 🥦 小夏识食 (不保存图片)")
-            food_img = st.file_uploader("上传饮食照", type=["jpg", "jpeg", "png"])
-            if food_img:
-                st.image(food_img, width=250)
-                if st.button("AI 识别食材"):
-                    with st.spinner("识别中..."):
-                        st.session_state.temp_food = analyze_food_with_gemini(food_img, gemini_key)
-            if "temp_food" in st.session_state:
-                st.info(st.session_state.temp_food)
-
-        with st.form("daily_form_fixed", clear_on_submit=True):
-            st.subheader("📝 今日深度记录")
+        with st.form("daily_form_v_master", clear_on_submit=True):
+            st.subheader(f"📝 {current_user} 的深度记录")
             log_date = st.date_input("日期", datetime.date.today())
             
             diet_detail = ""
             if current_user == "小夏":
-                diet_detail = st.text_area("🍱 今日饮食明细")
+                diet_detail = st.text_area("🍱 今日饮食明细", placeholder="具体吃了什么？(如：早起黑咖啡，中午瘦肉黄豆面，晚上一根黄瓜)")
 
             sports = st.multiselect("🏃 运动项目", ["呼啦圈", "散步", "羽毛球", "健身房", "拉伸"])
-            sport_time = st.slider("⏱️ 运动时长 (分钟)", 0, 180, 30)
-            diet_type = st.select_slider("🥗 饮食等级", options=["放纵🍕", "正常🍚", "清淡🥗", "严格🥦"], value="正常🍚")
+            sport_time = st.slider("⏱️ 运动时长 (分钟)", 0, 180, 30, step=5)
+            diet_type = st.select_slider("🥗 饮食控制等级", options=["放纵🍕", "正常🍚", "清淡🥗", "严格🥦"], value="正常🍚")
             
             is_poop, water, part_time = "N/A", 0.0, 0.0
             if current_user == "小夏":
                 st.write("---")
                 ch1, ch2 = st.columns(2)
-                is_poop = ch1.radio("💩 今日排便", ["未排便", "顺利排便 ✅"], horizontal=True)
+                is_poop = ch1.radio("💩 今日排便情况", ["未排便", "顺利排便 ✅"], horizontal=True)
                 water = ch2.slider("💧 饮水量 (L)", 0.5, 4.0, 2.0, 0.5)
             else:
-                part_time = st.number_input("⏳ 兼职时长 (小时)", 0.0, 14.0, 0.0)
+                st.write("---")
+                part_time = st.number_input("⏳ 今日兼职时长 (小时)", 0.0, 14.0, 0.0, step=0.5)
             
             st.write("---")
-            work = st.multiselect("💻 工作学术", ["看文献", "写论文", "投简历"])
-            work_time = st.slider("⏳ 投入时长 (小时)", 0.0, 14.0, 4.0)
+            work = st.multiselect("💻 学术与工作内容", ["看文献", "写论文", "找工作", "其他"])
+            work_time = st.slider("⏳ 专注时长 (小时)", 0.0, 14.0, 4.0, step=0.5)
             work_focus = st.select_slider("🎯 专注状态", options=["走神😴", "断续☕", "专注📚", "心流🔥"], value="专注📚")
-            detail = st.text_area("💌 碎碎念")
+            detail = st.text_area("💌 碎碎念/备注")
             mood = st.select_slider("✨ 心情", options=["😢", "😟", "😐", "😊", "🥰"], value="😊")
 
-            if st.form_submit_button("同步"):
-                final_detail = detail
-                if current_user == "小夏" and "temp_food" in st.session_state:
-                    final_detail = f"【AI建议】:{st.session_state.temp_food}\n{detail}"
-                
+            if st.form_submit_button("同步到云端"):
                 supabase.table("daily_logs").insert({
                     "user_name": current_user, "log_date": str(log_date), "sports": "|".join(sports),
                     "sport_minutes": float(sport_time), "diet": diet_type, "diet_detail": diet_detail,
                     "is_poop": is_poop, "water": water, "work": "|".join(work),
                     "academic_hours": float(work_time), "part_time_hours": float(part_time),
-                    "detail": final_detail, "mood": mood, "focus_level": work_focus
+                    "detail": detail, "mood": mood, "focus_level": work_focus
                 }).execute()
-                if "temp_food" in st.session_state: del st.session_state.temp_food
                 st.rerun()
 
     with col_r:
-        st.markdown("### 🤖 十日综合审计")
-        if st.button("生成复盘报告", use_container_width=True):
-            if deepseek_key and st.session_state.daily_logs:
-                with st.spinner("复盘中..."):
-                    history = st.session_state.daily_logs[:10]
-                    history_str = "\n".join([f"- {l['log_date']}: 饮食[{l.get('diet_detail')}] 排便[{l['is_poop']}] 心情[{l['mood']}]" for l in history])
-                    _, slope = get_prediction(pd.DataFrame(st.session_state.weight_data_list))
+        st.markdown("### 🤖 十日综合审计专家")
+        if st.button("生成深度分析报告", use_container_width=True):
+            if api_key_input and st.session_state.daily_logs:
+                with st.spinner("正在复盘近十天数据..."):
+                    # 提取近10天数据
+                    history_logs = st.session_state.daily_logs[:10]
+                    weight_df = pd.DataFrame(st.session_state.weight_data_list)
+                    _, slope = get_prediction(weight_df)
                     
-                    client = OpenAI(api_key=deepseek_key, base_url="https://api.deepseek.com")
-                    prompt = f"你是小耗子。请分析小夏近10天数据：{history_str}。当前体重斜率{slope:.3f}。请结合饮食和排便给出建议。" if current_user == "小夏" else f"你是小夏。分析小耗子近10天勤奋度：{history_str}"
-                    res = client.chat.completions.create(model="deepseek-chat", messages=[{"role": "user", "content": prompt}])
-                    st.markdown(f'<div class="report-box">{res.choices[0].message.content}</div>', unsafe_allow_html=True)
+                    history_str = "\n".join([
+                        f"- {l['log_date']}: 饮食[{l.get('diet_detail')}] 运动[{l['sports']} {l.get('sport_minutes')}min] 排便[{l['is_poop']}] 饮水[{l['water']}L] 专注[{l.get('focus_level')}] 心情[{l['mood']}]"
+                        for l in history_logs
+                    ])
+                    
+                    client = OpenAI(api_key=api_key_input, base_url="https://api.deepseek.com")
+                    
+                    if current_user == "小夏":
+                        prompt = f"""
+                        你是理科伴侣小耗子。请根据小夏近10天的数据进行深度综合分析：
+                        历史数据：{history_str}
+                        当前体重斜率：{slope:.3f}
+                        
+                        要求：
+                        1. 综合分析饮食明细与【排便情况】的相关性。
+                        2. 分析饮水量、运动时长对【体重斜率】的影响。
+                        3. 观察【专注情况】与【心情】的波动规律。
+                        4. 给出未来一周的综合建议（包括饮食调整、水分摄入建议）。
+                        语气要严谨、理性、有数据支撑，但透着对小夏的关心。
+                        """
+                    else:
+                        prompt = f"你是小夏。请分析小耗子近10天的兼职与学术时长数据：{history_str}。评价他的勤奋程度并嘱咐他平衡心情与休息。"
+                    
+                    response = client.chat.completions.create(model="deepseek-chat", messages=[{"role": "user", "content": prompt}])
+                    st.markdown(f'<div class="report-box">{response.choices[0].message.content}</div>', unsafe_allow_html=True)
 
-# 后续展示、体重、东京模块保持不变...
+        st.divider()
+        st.subheader("📜 历史存证")
+        for log in st.session_state.daily_logs[:5]: # 仅显示最近5条防止过长
+            with st.expander(f"📅 {log['log_date']} - {log['mood']}"):
+                if current_user == "小夏":
+                    st.write(f"🍱 **饮食:** {log.get('diet_detail', '未记录')}")
+                    st.write(f"💩 **排便:** {log['is_poop']} | 💧 **饮水:** {log['water']}L")
+                st.write(f"🏃 **运动:** {log['sports']} ({log.get('sport_minutes')}min)")
+                st.write(f"📚 **学术:** {log.get('academic_hours')}h ({log.get('focus_level')})")
+
+with tab2:
+    if current_user == "小夏":
+        df_w = pd.DataFrame(st.session_state.weight_data_list)
+        if not df_w.empty:
+            df_w['日期'] = pd.to_datetime(df_w['日期'])
+            calc_df = df_w.sort_values('日期').drop_duplicates('日期', keep='last')
+            pred_res, slope = get_prediction(calc_df)
+            c1, c2, c3 = st.columns(3)
+            c1.metric("体重斜率", f"{slope:.3f}"); c2.metric("距离目标", f"{round(calc_df['体重'].iloc[-1] - 55.0, 1)} kg"); c3.metric("达标预估", pred_res.strftime('%Y-%m-%d') if pred_res else "计算中")
+            st.plotly_chart(px.line(calc_df, x="日期", y="体重", markers=True, color_discrete_sequence=['#ff6b81']), use_container_width=True)
+        with st.form("w_form"):
+            val = st.number_input("录入体重 (kg)", 60.0, step=0.1); dt = st.date_input("测量日期", datetime.date.today())
+            if st.form_submit_button("更新"):
+                supabase.table("weight_data").insert({"user_name": "小夏", "weight_date": str(dt), "weight": val}).execute()
+                st.rerun()
+    else: st.info("💡 小耗子分区，请在 Tab1 专注学术时长记录。")
+
+# Tab 3 & 4 保持原有内容...
