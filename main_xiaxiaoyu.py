@@ -43,14 +43,29 @@ def get_weather(city_pinyin):
     except: return None
 
 def get_prediction(df):
-    if len(df) < 2: return None, 0
+    """
+    修正后的预测逻辑：
+    y = ax + b
+    55 = a * target_date_ordinal + b
+    target_date_ordinal = (55 - b) / a
+    """
+    if len(df) < 3: return None, 0 # 至少需要3个点进行线性回归
     try:
         temp_df = df.copy()
         temp_df['日期_ts'] = pd.to_datetime(temp_df['日期']).map(datetime.date.toordinal)
         x, y = temp_df['日期_ts'].values, temp_df['体重'].values.astype(float)
+        
+        # 线性拟合
         slope, intercept = np.polyfit(x, y, 1)
-        target_date = datetime.date.fromordinal(int((55.0 - intercept) / slope)) if slope < 0 else None
-        return target_date, slope
+        
+        # 只有在体重下降的情况下计算日期
+        if slope < 0:
+            target_ordinal = (55.0 - intercept) / slope
+            # 防止日期过远导致溢出
+            target_ordinal = min(target_ordinal, datetime.date(2027, 1, 1).toordinal())
+            return datetime.date.fromordinal(int(target_ordinal)), slope
+        else:
+            return "趋势平缓", slope
     except: return None, 0
 
 # --- 3. UI 样式 ---
@@ -92,26 +107,19 @@ with tab1:
         with st.form("daily_form_v_master", clear_on_submit=True):
             st.subheader(f"📝 {current_user} 的深度记录")
             log_date = st.date_input("日期", datetime.date.today())
-            
-            diet_detail = ""
-            if current_user == "小夏":
-                diet_detail = st.text_area("🍱 今日饮食明细", placeholder="具体吃了什么？(如：早起黑咖啡，中午瘦肉黄豆面，晚上一根黄瓜)")
-
+            diet_detail = st.text_area("🍱 今日饮食明细", placeholder="具体吃了什么？") if current_user == "小夏" else ""
             sports = st.multiselect("🏃 运动项目", ["呼啦圈", "散步", "羽毛球", "健身房", "拉伸"])
             sport_time = st.slider("⏱️ 运动时长 (分钟)", 0, 180, 30, step=5)
             diet_type = st.select_slider("🥗 饮食控制等级", options=["放纵🍕", "正常🍚", "清淡🥗", "严格🥦"], value="正常🍚")
             
             is_poop, water, part_time = "N/A", 0.0, 0.0
             if current_user == "小夏":
-                st.write("---")
                 ch1, ch2 = st.columns(2)
                 is_poop = ch1.radio("💩 今日排便情况", ["未排便", "顺利排便 ✅"], horizontal=True)
                 water = ch2.slider("💧 饮水量 (L)", 0.5, 4.0, 2.0, 0.5)
             else:
-                st.write("---")
                 part_time = st.number_input("⏳ 今日兼职时长 (小时)", 0.0, 14.0, 0.0, step=0.5)
             
-            st.write("---")
             work = st.multiselect("💻 学术与工作内容", ["看文献", "写论文", "找工作", "其他"])
             work_time = st.slider("⏳ 专注时长 (小时)", 0.0, 14.0, 4.0, step=0.5)
             work_focus = st.select_slider("🎯 专注状态", options=["走神😴", "断续☕", "专注📚", "心流🔥"], value="专注📚")
@@ -133,115 +141,54 @@ with tab1:
         if st.button("生成深度分析报告", use_container_width=True):
             if api_key_input and st.session_state.daily_logs:
                 with st.spinner("正在复盘近十天数据..."):
-                    # 提取近10天数据
                     history_logs = st.session_state.daily_logs[:10]
                     weight_df = pd.DataFrame(st.session_state.weight_data_list)
                     _, slope = get_prediction(weight_df)
-                    
-                    history_str = "\n".join([
-                        f"- {l['log_date']}: 饮食[{l.get('diet_detail')}] 运动[{l['sports']} {l.get('sport_minutes')}min] 排便[{l['is_poop']}] 饮水[{l['water']}L] 专注[{l.get('focus_level')}] 心情[{l['mood']}]"
-                        for l in history_logs
-                    ])
-                    
+                    history_str = "\n".join([f"- {l['log_date']}: 饮食[{l.get('diet_detail')}] 运动[{l['sports']}] 心情[{l['mood']}]" for l in history_logs])
                     client = OpenAI(api_key=api_key_input, base_url="https://api.deepseek.com")
-                    
-                    if current_user == "小夏":
-                        prompt = f"""
-                        你是理科伴侣小耗子。请根据小夏近10天的数据进行深度综合分析：
-                        历史数据：{history_str}
-                        当前体重斜率：{slope:.3f}
-                        
-                        要求：
-                        1. 综合分析饮食明细与【排便情况】的相关性。
-                        2. 分析饮水量、运动时长对【体重斜率】的影响。
-                        3. 观察【专注情况】与【心情】的波动规律。
-                        4. 给出未来一周的综合建议（包括饮食调整、水分摄入建议）。
-                        语气要严谨、理性、有数据支撑，但透着对小夏的关心。
-                        """
-                    else:
-                        prompt = f"你是小夏。请分析小耗子近10天的兼职与学术时长数据：{history_str}。评价他的勤奋程度并嘱咐他平衡心情与休息。"
-                    
+                    prompt = f"你是理科伴侣小耗子。分析小夏近10天数据：{history_str}。体重斜率{slope:.3f}。请分析代谢并给予关心建议。" if current_user == "小夏" else f"分析小耗子近10天勤奋度：{history_str}"
                     response = client.chat.completions.create(model="deepseek-chat", messages=[{"role": "user", "content": prompt}])
                     st.markdown(f'<div class="report-box">{response.choices[0].message.content}</div>', unsafe_allow_html=True)
-
-        st.divider()
-        st.subheader("📜 历史存证")
-        for log in st.session_state.daily_logs[:5]: # 仅显示最近5条防止过长
-            with st.expander(f"📅 {log['log_date']} - {log['mood']}"):
-                if current_user == "小夏":
-                    st.write(f"🍱 **饮食:** {log.get('diet_detail', '未记录')}")
-                    st.write(f"💩 **排便:** {log['is_poop']} | 💧 **饮水:** {log['water']}L")
-                st.write(f"🏃 **运动:** {log['sports']} ({log.get('sport_minutes')}min)")
-                st.write(f"📚 **学术:** {log.get('academic_hours')}h ({log.get('focus_level')})")
 
 with tab2:
     if current_user == "小夏":
         st.markdown("### 📉 减脂美学：目标 55.0 kg")
         df_w = pd.DataFrame(st.session_state.weight_data_list)
-        
         if not df_w.empty:
-            # 数据清洗：按日期排序并去重
             df_w['日期'] = pd.to_datetime(df_w['日期'])
             calc_df = df_w.sort_values('日期').drop_duplicates('日期', keep='last')
-            
-            # 获取预测数据：目标设定为 55.0
             pred_date, slope = get_prediction(calc_df)
             
-            # 第一行：核心指标
             c1, c2, c3 = st.columns(3)
-            current_weight = calc_df['体重'].iloc[-1]
-            diff = round(current_weight - 55.0, 1)
-            
-            c1.metric("当前体重", f"{current_weight} kg")
-            c2.metric("距离目标 (55kg)", f"{diff} kg", delta=f"{slope:.3f} kg/天", delta_color="inverse")
-            
-            if diff <= 0:
-                c3.success("🎉 已达成目标！")
-            else:
-                c3.metric("预估达标日", pred_date.strftime('%Y-%m-%d') if pred_date else "坚持记录中")
+            current_w = calc_df['体重'].iloc[-1]
+            diff = round(current_w - 55.0, 1)
+            c1.metric("当前体重", f"{current_w} kg")
+            c2.metric("距离目标", f"{diff} kg", delta=f"{slope:.3f} kg/d", delta_color="inverse")
+            c3.metric("预估达标日", str(pred_date) if pred_date else "计算中...")
 
-            # 第二行：变化曲线
-            st.plotly_chart(px.line(calc_df, x="日期", y="体重", 
-                                  title="体重变化趋势 (目标线: 55kg)",
-                                  markers=True, 
-                                  color_discrete_sequence=['#ff6b81']), use_container_width=True)
-            
-            # AI 审计提示
-            if diff > 0:
-                st.write(f"💡 *小耗子的理科分析：按照目前的斜率 {slope:.3f}，你还需要减掉 {diff}kg。加油小夏！*")
+            st.plotly_chart(px.line(calc_df, x="日期", y="体重", title="体重变化趋势", markers=True, color_discrete_sequence=['#ff6b81']), use_container_width=True)
         
-        # 录入表单
         with st.form("w_form_new"):
             st.markdown("#### ⚖️ 记录今日数据")
             col_a, col_b = st.columns(2)
-            val = col_a.number_input("体重 (kg)", value=60.0, min_value=40.0, max_value=100.0, step=0.1)
+            val = col_a.number_input("体重 (kg)", value=60.0, step=0.1)
             dt = col_b.date_input("测量日期", datetime.date.today())
-            if st.form_submit_button("更新数据并存入云端"):
-                supabase.table("weight_data").insert({
-                    "user_name": "小夏", 
-                    "weight_date": str(dt), 
-                    "weight": val
-                }).execute()
-                st.success("数据已同步！正在刷新趋势图...")
+            if st.form_submit_button("存入云端"):
+                supabase.table("weight_data").insert({"user_name": "小夏", "weight_date": str(dt), "weight": val}).execute()
                 st.rerun()
-    else:
-        st.info("💡 小耗子分区。请去【时光机】检查小夏的减脂进度并给予鼓励。")
 
 with tab3:
     st.markdown("## 🎆 东京冒险清单：夏日花火之约")
-    ca1, ca2 = st.columns([1, 1])
-    with ca1:
-        st.markdown("### 🎯 我们的约定")
-        st.checkbox("✨ 在夏夜的东京参加一场盛大的花火大会！", value=False)
-        st.write("已规划最佳观赏位，浴衣待命中。")
-    with ca2: st.image("https://img.picgo.net/2024/05/22/fireworks_kimono_anime18090543e86c0757.md.png",
-                       use_container_width=True)
+    # 更换为稳定的图片链接 (Unsplash 随机动漫风格东京图)
+    st.image("https://images.unsplash.com/photo-1540959733332-eab4deabeeaf?auto=format&fit=crop&w=1200&q=80", 
+             caption="2026, 重逢在东京的街头", use_container_width=True)
+    st.markdown("""
+    - [ ] ✨ 在夏夜的东京参加一场盛大的花火大会！
+    - [ ] ✨ 穿着浴衣走在浅草寺的灯火下
+    - [ ] ✨ 找一家藏在巷子里最好吃的鳗鱼饭
+    """)
 
 with tab4:
-    st.markdown("## 📟 2026 跨年系统指令")
-    if st.text_input("输入 Access Code：", type="password") == "wwhaxxy1314":
+    if st.text_input("授权码", type="password") == "wwhaxxy1314":
         st.balloons()
-        st.markdown("""<div style="background-color: #f8f9fa; padding: 25px; border-radius: 15px; border: 1px solid #dee2e6; font-family: monospace;">
-            <h3>> SYSTEM_MSG: 2026.01.01</h3><hr><p>TO: 小夏 | STATUS: 任务完成<br>我们在终点见。<br><br>—— [运维负责人: 小耗子 🐭]</p></div>""",
-                    unsafe_allow_html=True)
-
+        st.markdown('<div class="diary-card">2026, 我们东京见。</div>', unsafe_allow_html=True)
