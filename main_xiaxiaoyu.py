@@ -5,69 +5,84 @@ from openai import OpenAI
 import datetime
 import numpy as np
 import requests
+from supabase import create_client, Client # 新增：数据库连接库
 
-# --- 0. 核心配置 ---
+# --- 0. 核心配置与 Supabase 连接 ---
 DEFAULT_API_KEY = "sk-051a17fa2f404ba2a9459d5f356de93b"
 LOVE_START_DATE = datetime.date(2025, 1, 1)
 
-# --- 1. 基础配置与高级 UI 美化 ---
+# 请在此处填入你的 Supabase 配置
+SUPABASE_URL = "https://tqtejtfkqxkfrnelqczn.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRxdGVqdGZrcXhrZnJuZWxxY3puIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY5NTgxMjksImV4cCI6MjA4MjUzNDEyOX0.9gBVQZhFBFg9a9hm0d6BUW-s8yhCGPIjwmbLLZ9F0Ow"
+
+@st.cache_resource
+def init_supabase():
+    return create_client(SUPABASE_URL, SUPABASE_KEY)
+
+supabase = init_supabase()
+
+# --- 1. 数据库持久化函数 ---
+def load_all_data():
+    """从数据库加载历史数据到 SessionState"""
+    try:
+        # 加载体重
+        w_res = supabase.table("weight_data").select("*").order("weight_date").execute()
+        st.session_state.weight_data_list = [{"日期": r['weight_date'], "体重": r['weight']} for r in w_res.data]
+        if not st.session_state.weight_data_list: # 初始兜底
+             st.session_state.weight_data_list = [{"日期": "2025-12-28", "体重": 65.0}]
+        
+        # 加载日记
+        l_res = supabase.table("daily_logs").select("*").order("log_date", desc=True).execute()
+        st.session_state.daily_logs = l_res.data
+    except Exception as e:
+        st.error(f"数据库读取失败: {e}")
+
+def save_log_to_supabase(log_entry):
+    """保存单条日记"""
+    supabase.table("daily_logs").insert({
+        "log_date": log_entry["日期"],
+        "sports": log_entry["运动"],
+        "diet": log_entry["饮食"],
+        "is_poop": log_entry["大便"],
+        "water": log_entry["饮水"],
+        "work": log_entry["工作"],
+        "detail": log_entry["详情"],
+        "mood": log_entry["心情"]
+    }).execute()
+
+def save_weight_to_supabase(date, weight):
+    """保存单条体重"""
+    supabase.table("weight_data").insert({
+        "weight_date": str(date),
+        "weight": weight
+    }).execute()
+
+# --- 2. 基础配置与 UI 样式 ---
 st.set_page_config(page_title="2026东京之约 | 专属空间", layout="wide", page_icon="🗼")
 
-st.markdown(f"""
+st.markdown("""
     <style>
-    /* 全局背景：粉蓝浪漫渐变 */
-    .stApp {{
-        background: linear-gradient(135deg, #fff5f7 0%, #f0f4ff 100%);
-    }}
-
-    /* 核心指标居中魔法 */
-    [data-testid="stMetric"] {{
+    .stApp { background: linear-gradient(135deg, #fff5f7 0%, #f0f4ff 100%); }
+    [data-testid="stMetric"] {
         background-color: rgba(255, 255, 255, 0.7) !important;
-        border-radius: 20px !important;
-        padding: 20px !important;
-        border: 1px solid #ffe4e8 !important;
-        text-align: center !important;
+        border-radius: 20px !important; padding: 20px !important;
+        border: 1px solid #ffe4e8 !important; text-align: center !important;
         box-shadow: 0 4px 15px rgba(255, 182, 193, 0.1) !important;
-    }}
-
-    /* 强制数值和标签垂直居中对齐 */
-    [data-testid="stMetricValue"] > div, [data-testid="stMetricLabel"] > div {{
-        display: flex !important;
-        justify-content: center !important;
-        align-items: center !important;
-        text-align: center !important;
-        width: 100%;
-    }}
-
-    [data-testid="stMetricValue"] > div {{ color: #ff6b81 !important; }}
-    [data-testid="stMetricLabel"] > div {{ color: #6a89cc !important; }}
-
-    /* 表单与卡片样式 */
-    div[data-testid="stForm"], div[data-testid="stExpander"] {{
-        background-color: rgba(255, 255, 255, 0.8) !important;
-        border-radius: 20px !important;
-        border: 1px solid #ffe4e8 !important;
-    }}
-
-    /* 标题居中与配色 */
-    h1, h2, h3 {{
-        color: #ff6b81 !important;
-        text-align: center !important;
-    }}
-
-    /* 按钮样式：樱花粉 */
-    .stButton>button {{
-        width: 100%;
-        border-radius: 25px !important;
-        background-color: #ff6b81 !important;
-        color: white !important;
-        border: none !important;
-        height: 3em;
-    }}
+    }
+    [data-testid="stMetricValue"] > div, [data-testid="stMetricLabel"] > div {
+        display: flex !important; justify-content: center !important; align-items: center !important; width: 100%;
+    }
+    [data-testid="stMetricValue"] > div { color: #ff6b81 !important; }
+    [data-testid="stMetricLabel"] > div { color: #6a89cc !important; }
+    div[data-testid="stForm"], div[data-testid="stExpander"] {
+        background-color: rgba(255, 255, 255, 0.8) !important; border-radius: 20px !important; border: 1px solid #ffe4e8 !important;
+    }
+    h1, h2, h3 { color: #ff6b81 !important; text-align: center !important; }
+    .stButton>button { width: 100%; border-radius: 25px !important; background-color: #ff6b81 !important; color: white !important; border: none !important; height: 3em; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. 工具函数 ---
+# --- 3. 工具函数 ---
 def get_weather(city_pinyin):
     api_key = "3f4ff1ded1a1a5fc5335073e8cf6f722"
     url = f"http://api.openweathermap.org/data/2.5/weather?q={city_pinyin}&appid={api_key}&units=metric&lang=zh_cn"
@@ -89,13 +104,12 @@ def get_prediction(df):
         return "趋势平缓", slope
     except: return None, 0
 
-# --- 3. 数据初始化 ---
-if 'weight_data_list' not in st.session_state:
-    st.session_state.weight_data_list = [{"日期": "2025-12-28", "体重": 65.0, "心情": "😊"}]
-if 'daily_logs' not in st.session_state:
-    st.session_state.daily_logs = []
+# --- 4. 数据初始化 (修改为从 DB 加载) ---
+if 'data_loaded' not in st.session_state:
+    load_all_data()
+    st.session_state.data_loaded = True
 
-# --- 4. 侧边栏 ---
+# --- 5. 侧边栏 ---
 with st.sidebar:
     st.markdown("<h2 style='text-align: center;'>🗼 2026 东京之约</h2>", unsafe_allow_html=True)
     days_left = (datetime.date(2026, 6, 23) - datetime.date.today()).days
@@ -110,7 +124,7 @@ with st.sidebar:
     st.divider()
     api_key_input = st.text_input("🔑 小耗子专属秘钥", value=DEFAULT_API_KEY, type="password")
 
-# --- 5. 主界面 ---
+# --- 6. 主界面 ---
 st.markdown("<h1 style='text-align: center;'>💖 小耗子和小夏的秘密基地</h1>", unsafe_allow_html=True)
 days_together = (datetime.date.today() - LOVE_START_DATE).days
 st.markdown(f"### 我们已经并肩作战了 {days_together} 天 🎉")
@@ -139,68 +153,67 @@ with tab1:
             mood = st.select_slider("✨ 心情", options=["😢", "😟", "😐", "😊", "🥰"], value="😊")
 
             if st.form_submit_button("存入时光机"):
-                st.session_state.daily_logs.append({
+                new_entry = {
                     "日期": str(log_date), "运动": f"{'|'.join(sports)}({sport_time}min)",
                     "饮食": diet, "大便": is_poop, "饮水": water,
                     "工作": f"{'|'.join(work)}({work_time}h - {work_focus})", "详情": detail, "心情": mood
-                })
+                }
+                # 保存到数据库
+                save_log_to_supabase(new_entry)
+                # 重新加载显示
+                load_all_data()
                 st.rerun()
 
-        # 展示历史记录
         if st.session_state.daily_logs:
             st.subheader("📜 往日回忆")
-            for log in reversed(st.session_state.daily_logs):
-                with st.expander(f"📅 {log['日期']} - 心情: {log['心情']}"):
-                    st.write(f"**🏃 运动：** {log['运动']} | **🥗 饮食：** {log['饮食']} | **💩 排便：** {log['大便']}")
-                    st.write(f"**💻 进度：** {log['工作']} | **💧 饮水：** {log.get('饮水', 2.0)}L")
-                    if log.get('详情') and log['详情'].strip():
-                        st.markdown(f"""
-                        <div style="background-color: #fff0f3; padding: 12px; border-radius: 12px; border-left: 4px solid #ff6b81; margin-top: 10px;">
+            for log in st.session_state.daily_logs:
+                # 适配数据库字段名（如果是从DB读出来的，Key可能是英文或中文，这里做个兼容）
+                l_date = log.get("log_date") or log.get("日期")
+                l_mood = log.get("mood") or log.get("心情")
+                with st.expander(f"📅 {l_date} - 心情: {l_mood}"):
+                    st.write(f"**🏃 运动：** {log.get('sports') or log.get('运动')} | **🥗 饮食：** {log.get('diet') or log.get('饮食')} | **💩 排便：** {log.get('is_poop') or log.get('大便')}")
+                    st.write(f"**💻 进度：** {log.get('work') or log.get('工作')} | **💧 饮水：** {log.get('water') or log.get('饮水')}L")
+                    txt = log.get('detail') or log.get('详情')
+                    if txt:
+                        st.markdown(f"""<div style="background-color: #fff0f3; padding: 12px; border-radius: 12px; border-left: 4px solid #ff6b81; margin-top: 10px;">
                             <span style="color: #ff6b81; font-weight: bold;">💌 给小耗子的私语：</span><br>
-                            <span style="color: #555; font-style: italic;">{log['详情']}</span>
-                        </div>
-                        """, unsafe_allow_html=True)
+                            <span style="color: #555; font-style: italic;">{txt}</span></div>""", unsafe_allow_html=True)
 
     with col_r:
         st.markdown("### 💌 小耗子的叮嘱")
         quotes = ["为了见你，我正在东京努力变优秀。", "所有的数学斜率，最终都会指向我们的重逢。", "不仅要瘦，还要健康，这是小耗子唯一的命令。"]
         st.write(f"*{np.random.choice(quotes)}*")
-
         if st.button("查看全维度深度审计报告", use_container_width=True):
-            if api_key_input:
-                with st.spinner("审计计算中..."):
+            if api_key_input and st.session_state.daily_logs:
+                with st.spinner("审计中..."):
                     try:
                         df_w = pd.DataFrame(st.session_state.weight_data_list)
                         pred_date, slope = get_prediction(df_w)
-                        last = st.session_state.daily_logs[-1]
+                        last = st.session_state.daily_logs[0] # 数据库已排好序，最新的是第一个
                         client = OpenAI(api_key=api_key_input, base_url="https://api.deepseek.com")
-                        prompt = f"""你是‘小耗子’。当前体重{df_w['体重'].iloc[-1]}kg，斜率{slope:.3f}。排便{last['大便']}，饮水{last['饮水']}L。饮食{last['饮食']}，工作{last['工作']}，运动{last['运动']}。心情{last['心情']}。请给出现状分析、饮食处方、运动方案和暖心总结。"""
+                        prompt = f"你是‘小耗子’。当前体重{df_w['体重'].iloc[-1]}kg，斜率{slope:.3f}。排便{last.get('is_poop')}，饮水{last.get('water')}L。饮食{last.get('diet')}，工作{last.get('work')}。请给出现状分析、饮食处方、运动方案和暖心总结。"
                         response = client.chat.completions.create(model="deepseek-chat", messages=[{"role": "system", "content": "你是一个理性的理科生伴侣。"},{"role": "user", "content": prompt}], temperature=0.3)
                         st.info(response.choices[0].message.content)
-                    except: st.error("AI 审计暂时不可用")
+                    except: st.error("AI 暂时离线")
 
 with tab2:
-    # 减脂数学模型保持不变
     df_weight = pd.DataFrame(st.session_state.weight_data_list)
     df_weight['日期'] = pd.to_datetime(df_weight['日期'])
     calc_df = df_weight.sort_values('日期').drop_duplicates('日期', keep='last')
     pred_res, slope = get_prediction(calc_df)
-
     st.markdown("### 📈 数据背后的爱与科学")
     c1, c2, c3 = st.columns(3)
     with c1: st.metric("日均斜率 (kg/d)", f"{slope:.3f}")
     with c2: st.metric("距离 55kg 还差", f"{round(calc_df['体重'].iloc[-1] - 55.0, 1)} kg")
-    with c3: st.metric("预估达标日", pred_res.strftime('%Y-%m-%d') if isinstance(pred_res, datetime.date) else "数据收集中")
-    # ... 表单和绘图代码 ...
+    with c3: st.metric("预估达标日", pred_res.strftime('%Y-%m-%d') if isinstance(pred_res, datetime.date) else "测算中")
     with st.form("weight_v12"):
         cw1, cw2 = st.columns(2)
-        nw = cw1.number_input("体重 (kg)", value=float(calc_df['体重'].iloc[-1]), step=0.1)
-        nd = cw2.date_input("测量日期", datetime.date.today())
+        nw, nd = cw1.number_input("体重 (kg)", value=float(calc_df['体重'].iloc[-1]), step=0.1), cw2.date_input("测量日期", datetime.date.today())
         if st.form_submit_button("更新数学模型"):
-            st.session_state.weight_data_list.append({"日期": str(nd), "体重": nw})
+            save_weight_to_supabase(nd, nw)
+            load_all_data()
             st.rerun()
-    fig = px.line(calc_df, x="日期", y="体重", markers=True, color_discrete_sequence=['#ff6b81'])
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(px.line(calc_df, x="日期", y="体重", markers=True, color_discrete_sequence=['#ff6b81']), use_container_width=True)
 
 with tab3:
     st.markdown("<h2 style='text-align: center;'>🎆 东京冒险清单：夏日花火之约</h2>", unsafe_allow_html=True)
@@ -213,13 +226,10 @@ with tab3:
 
 with tab4:
     st.markdown("## 📟 2026 跨年系统指令")
-    input_pass = st.text_input("输入 Access Code 解锁：", type="password")
+    input_pass = st.text_input("输入 Access Code：", type="password")
     if input_pass == "wwhaxxy1314":
         st.balloons()
-        st.markdown(f"""
-        <div style="background-color: #fff0f3; padding: 30px; border-radius: 20px; border: 2px dashed #ff6b81;">
+        st.markdown("""<div style="background-color: #fff0f3; padding: 30px; border-radius: 20px; border: 2px dashed #ff6b81;">
             <h3 style="color: #ff6b81; text-align: center;">📅 2026.01.01</h3>
-            <p style="color: #555; line-height: 1.8;">亲爱的小夏：跨过2025，我见证了你的努力。这个基地是我们的证明。新的一年，愿你少点焦虑，多点顺畅。我们在终点见。<br><br>
-            <span style="float: right;">—— [运维负责人: 小耗子 🐭]</span></p>
-        </div>
-        """, unsafe_allow_html=True)
+            <p style="color: #555; line-height: 1.8;">亲爱的小夏：跨过2025，我见证了你的努力。新的一年，愿你少一点焦虑，多一点顺畅。我们在终点见。<br><br>
+            <span style="float: right;">—— [运维负责人: 小耗子 🐭]</span></p></div>""", unsafe_allow_html=True)
