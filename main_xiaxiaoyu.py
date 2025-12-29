@@ -60,8 +60,8 @@ def get_prediction(df):
         temp_df = df.copy()
         temp_df['日期_ts'] = pd.to_datetime(temp_df['日期']).map(datetime.date.toordinal)
         x, y = temp_df['日期_ts'].values, temp_df['体重'].values.astype(float)
-        slope, _ = np.polyfit(x, y, 1)
-        target_date = datetime.date.fromordinal(int((55.0 - np.polyfit(x, y, 1)[1]) / slope)) if slope < 0 else None
+        slope, intercept = np.polyfit(x, y, 1)
+        target_date = datetime.date.fromordinal(int((55.0 - intercept) / slope)) if slope < 0 else None
         return target_date, slope
     except: return None, 0
 
@@ -92,13 +92,14 @@ tab1, tab2, tab3, tab4 = st.tabs(["🌸 时光机", "📉 减脂美学", "🎒 �
 with tab1:
     col_l, col_r = st.columns([2, 1])
     with col_l:
-        with st.form("daily_form", clear_on_submit=True):
+        with st.form("daily_form_v_final_sql", clear_on_submit=True):
             st.subheader(f"📝 {current_user} 的记录")
             log_date = st.date_input("日期", datetime.date.today())
+            
             sports = st.multiselect("🏃 运动健身", ["呼啦圈", "散步", "羽毛球", "健身房", "拉伸"])
+            sport_time = st.slider("⏱️ 运动时长 (分钟)", 0, 180, 30, step=5)
             diet = st.select_slider("🥗 饮食", options=["放纵🍕", "正常🍚", "清淡🥗", "严格🥦"], value="正常🍚")
             
-            # --- 动态显示：只有小夏记录排便和饮水 ---
             is_poop, water, part_time = "N/A", 0.0, 0.0
             if current_user == "小夏":
                 st.write("---")
@@ -107,20 +108,29 @@ with tab1:
                 water = ch2.slider("💧 饮水量 (L)", 0.5, 4.0, 2.0, 0.5)
             else:
                 st.write("---")
-                part_time = st.number_input("⏳ 今日兼职时长 (小时)", 0.0, 12.0, 0.0, step=0.5)
+                part_time = st.number_input("⏳ 今日兼职时长 (小时)", 0.0, 14.0, 0.0, step=0.5)
             
             st.write("---")
             work = st.multiselect("💻 工作与学术", ["看文献", "写大论文", "写小论文", "阅读就业信息"])
+            work_time = st.slider("⏳ 累计时长 (小时)", 0.0, 14.0, 4.0, step=0.5)
             work_focus = st.select_slider("🎯 专注情况", options=["走神😴", "断续☕", "专注📚", "心流🔥"], value="专注📚")
             detail = st.text_area("💌 碎碎念/备注")
             mood = st.select_slider("✨ 心情", options=["😢", "😟", "😐", "😊", "🥰"], value="😊")
 
             if st.form_submit_button("同步"):
+                # 现在的代码直接对应你 SQL 里的新增列
                 supabase.table("daily_logs").insert({
-                    "user_name": current_user, "log_date": str(log_date), "sports": "|".join(sports),
-                    "diet": diet, "is_poop": is_poop, "water": water,
-                    "work": f"{'|'.join(work)} (Focus: {work_focus})", 
-                    "detail": f"[兼职:{part_time}h] {detail}" if current_user == "小耗子" else detail, 
+                    "user_name": current_user, 
+                    "log_date": str(log_date), 
+                    "sports": "|".join(sports),
+                    "sport_minutes": float(sport_time),
+                    "diet": diet, 
+                    "is_poop": is_poop, 
+                    "water": water,
+                    "work": "|".join(work),
+                    "academic_hours": float(work_time),
+                    "part_time_hours": float(part_time),
+                    "detail": detail, 
                     "mood": mood
                 }).execute()
                 st.rerun()
@@ -130,8 +140,12 @@ with tab1:
                 with st.expander(f"📅 {log['log_date']} - 心情: {log['mood']}"):
                     if current_user == "小夏":
                         st.write(f"**排便:** {log['is_poop']} | **饮水:** {log['water']}L")
-                    st.write(f"**运动:** {log['sports']} | **饮食:** {log['diet']}")
-                    st.write(f"**学术:** {log['work']}")
+                        st.write(f"**🏃 运动:** {log['sports']} ({log.get('sport_minutes', 0)} min)")
+                    else:
+                        st.write(f"**⏳ 兼职:** {log.get('part_time_hours', 0)} 小时")
+                    
+                    st.write(f"**💻 学术:** {log['work']} ({log.get('academic_hours', 0)} h)")
+                    st.write(f"**🥗 饮食:** {log['diet']}")
                     if log['detail']: st.markdown(f'<div class="diary-card">💌 {log["detail"]}</div>', unsafe_allow_html=True)
                     if st.button("🗑️ 删除", key=f"del_{log['id']}"): delete_record("daily_logs", log['id'])
 
@@ -142,15 +156,15 @@ with tab1:
                 with st.spinner("审计中..."):
                     last = st.session_state.daily_logs[0]
                     client = OpenAI(api_key=api_key_input, base_url="https://api.deepseek.com")
-                    # --- AI 提示词差异化 ---
                     if current_user == "小夏":
-                        prompt = f"你是理科伴侣小耗子。小夏今日排便{last['is_poop']}，饮水{last['water']}L，饮食{last['diet']}，心情{last['mood']}。请严谨地从生理代谢角度分析并鼓励。"
+                        prompt = f"你是理科伴侣小耗子。小夏今天运动了{last['sport_minutes']}分钟，排便情况【{last['is_poop']}】，饮水{last['water']}L。请分析其能量代谢和健康状态。"
                     else:
-                        prompt = f"你是伴侣小夏。小耗子今日兼职和学术表现为{last['work']}，备注为{last['detail']}。请以鼓励和关心的语气评价他的勤奋。"
+                        prompt = f"你是伴侣小夏。小耗子今天兼职{last['part_time_hours']}小时，学术{last['academic_hours']}小时。请以关心和鼓励的语气评价他的努力。"
                     
                     response = client.chat.completions.create(model="deepseek-chat", messages=[{"role": "user", "content": prompt}])
                     st.info(response.choices[0].message.content)
 
+# 其他 tab2, tab3, tab4 逻辑保持一致...
 with tab2:
     if current_user == "小夏":
         df_w = pd.DataFrame(st.session_state.weight_data_list)
@@ -161,22 +175,22 @@ with tab2:
             c1, c2, c3 = st.columns(3)
             c1.metric("体重斜率", f"{slope:.3f}")
             c2.metric("距离目标", f"{round(calc_df['体重'].iloc[-1] - 55.0, 1)} kg")
-            c3.metric("达标预估", pred_res.strftime('%Y-%m-%d') if pred_res else "计算中")
+            c3.metric("预测达标", pred_res.strftime('%Y-%m-%d') if pred_res else "测算中")
             st.plotly_chart(px.line(calc_df, x="日期", y="体重", markers=True, color_discrete_sequence=['#ff6b81']), use_container_width=True)
         
         with st.form("w_form"):
             val = st.number_input("体重 (kg)", 60.0, step=0.1)
-            dt = st.date_input("测量日期", datetime.date.today())
+            dt = st.date_input("日期", datetime.date.today())
             if st.form_submit_button("更新体重"):
                 supabase.table("weight_data").insert({"user_name": "小夏", "weight_date": str(dt), "weight": val}).execute()
                 st.rerun()
     else:
-        st.info("💡 小耗子分区无需记录体重，请专注于兼职与学术进度的同步。")
+        st.info("💡 小耗子分区无需记录体重。")
 
-with tab3: # 东京冒险
+with tab3:
     st.image("https://img.picgo.net/2024/05/22/fireworks_kimono_anime18090543e86c0757.md.png", use_container_width=True)
 
-with tab4: # 元旦信箱
+with tab4:
     if st.text_input("授权码", type="password") == "wwhaxxy1314":
         st.balloons()
-        st.markdown('<div style="background-color:#fff0f3;padding:20px;border-radius:15px;border:1px dashed #ff6b81;">2026, 重逢在即。</div>', unsafe_allow_html=True)
+        st.markdown('<div class="diary-card">2026, 重逢在即。加油！</div>', unsafe_allow_html=True)
