@@ -82,19 +82,17 @@ with st.sidebar:
 
 load_all_data(current_user)
 
-# --- 5. 主界面 ----
-# 增加一个顶级的私人空间标识
+# --- 5. 主界面 ---
 st.markdown("""
     <div style='text-align:center; padding:10px; border-radius:15px; background: rgba(255,107,129,0.1); border: 1px dashed #ff6b81; margin-bottom: 20px;'>
         <span style='color: #ff6b81; font-weight: bold;'>🔒 小夏 ❤️ 小耗子 的私人领地 (Private Space)</span>
     </div>
     """, unsafe_allow_html=True)
 
-# 动态显示当前切分的分区标题
 st.markdown(f"<h1>💖 {current_user} 的专属分区</h1>", unsafe_allow_html=True)
-
 days_together = (datetime.date.today() - LOVE_START_DATE).days
 st.markdown(f"<p style='text-align:center;'>这是我们守护彼此的第 {days_together} 天 🎉</p>", unsafe_allow_html=True)
+
 tab1, tab2, tab3, tab4 = st.tabs(["🌸 时光机", "📉 减脂美学", "🎒 东京冒险", "💌 元旦信箱"])
 
 with tab1:
@@ -104,9 +102,14 @@ with tab1:
             st.subheader(f"📝 {current_user} 的记录")
             log_date = st.date_input("日期", datetime.date.today())
             
+            # --- 饮食明细录入（仅小夏显示） ---
+            diet_detail = ""
+            if current_user == "小夏":
+                diet_detail = st.text_area("🍱 今日饮食明细", placeholder="例如：早餐全麦面包，午餐鸡胸肉+黄豆面，晚餐半个红薯")
+
             sports = st.multiselect("🏃 运动健身", ["呼啦圈", "散步", "羽毛球", "健身房", "拉伸"])
             sport_time = st.slider("⏱️ 运动时长 (分钟)", 0, 180, 30, step=5)
-            diet = st.select_slider("🥗 饮食", options=["放纵🍕", "正常🍚", "清淡🥗", "严格🥦"], value="正常🍚")
+            diet = st.select_slider("🥗 饮食总体控制", options=["放纵🍕", "正常🍚", "清淡🥗", "严格🥦"], value="正常🍚")
             
             is_poop, water, part_time = "N/A", 0.0, 0.0
             if current_user == "小夏":
@@ -126,13 +129,13 @@ with tab1:
             mood = st.select_slider("✨ 心情", options=["😢", "😟", "😐", "😊", "🥰"], value="😊")
 
             if st.form_submit_button("同步"):
-                # 现在的代码直接对应你 SQL 里的新增列
                 supabase.table("daily_logs").insert({
                     "user_name": current_user, 
                     "log_date": str(log_date), 
                     "sports": "|".join(sports),
                     "sport_minutes": float(sport_time),
                     "diet": diet, 
+                    "diet_detail": diet_detail, # 存入详细描述
                     "is_poop": is_poop, 
                     "water": water,
                     "work": "|".join(work),
@@ -148,12 +151,9 @@ with tab1:
                 with st.expander(f"📅 {log['log_date']} - 心情: {log['mood']}"):
                     if current_user == "小夏":
                         st.write(f"**排便:** {log['is_poop']} | **饮水:** {log['water']}L")
-                        st.write(f"**🏃 运动:** {log['sports']} ({log.get('sport_minutes', 0)} min)")
-                    else:
-                        st.write(f"**⏳ 兼职:** {log.get('part_time_hours', 0)} 小时")
-                    
+                        if log.get('diet_detail'): st.write(f"**🍱 饮食:** {log['diet_detail']}")
+                    st.write(f"**🏃 运动:** {log['sports']} ({log.get('sport_minutes', 0)} min)")
                     st.write(f"**💻 学术:** {log['work']} ({log.get('academic_hours', 0)} h)")
-                    st.write(f"**🥗 饮食:** {log['diet']}")
                     if log['detail']: st.markdown(f'<div class="diary-card">💌 {log["detail"]}</div>', unsafe_allow_html=True)
                     if st.button("🗑️ 删除", key=f"del_{log['id']}"): delete_record("daily_logs", log['id'])
 
@@ -165,14 +165,23 @@ with tab1:
                     last = st.session_state.daily_logs[0]
                     client = OpenAI(api_key=api_key_input, base_url="https://api.deepseek.com")
                     if current_user == "小夏":
-                        prompt = f"你是理科伴侣小耗子。小夏今天运动了{last['sport_minutes']}分钟，排便情况【{last['is_poop']}】，饮水{last['water']}L。请分析其能量代谢和健康状态。"
+                        # AI 会分析饮食明细
+                        prompt = f"""
+                        你是理科伴侣小耗子。小夏今天身体反馈如下：
+                        - 饮食内容：{last.get('diet_detail', '未描述')}
+                        - 饮食评价：{last['diet']}
+                        - 排便情况：{last['is_poop']}
+                        - 饮水量：{last['water']}L
+                        - 运动：{last['sport_minutes']}分钟
+                        
+                        请结合饮食成分（比如纤维摄入是否利于肠道）和排便数据，给出理性的代谢分析与建议。
+                        """
                     else:
-                        prompt = f"你是伴侣小夏。小耗子今天兼职{last['part_time_hours']}小时，学术{last['academic_hours']}小时。请以关心和鼓励的语气评价他的努力。"
+                        prompt = f"你是伴侣小夏。小耗子今天兼职{last['part_time_hours']}小时，学术{last['academic_hours']}小时。请评价他的勤奋并给予鼓励。"
                     
                     response = client.chat.completions.create(model="deepseek-chat", messages=[{"role": "user", "content": prompt}])
                     st.info(response.choices[0].message.content)
 
-# 其他 tab2, tab3, tab4 逻辑保持一致...
 with tab2:
     if current_user == "小夏":
         df_w = pd.DataFrame(st.session_state.weight_data_list)
@@ -185,21 +194,15 @@ with tab2:
             c2.metric("距离目标", f"{round(calc_df['体重'].iloc[-1] - 55.0, 1)} kg")
             c3.metric("预测达标", pred_res.strftime('%Y-%m-%d') if pred_res else "测算中")
             st.plotly_chart(px.line(calc_df, x="日期", y="体重", markers=True, color_discrete_sequence=['#ff6b81']), use_container_width=True)
-        
         with st.form("w_form"):
-            val = st.number_input("体重 (kg)", 60.0, step=0.1)
-            dt = st.date_input("日期", datetime.date.today())
+            val = st.number_input("体重 (kg)", 60.0, step=0.1); dt = st.date_input("日期", datetime.date.today())
             if st.form_submit_button("更新体重"):
                 supabase.table("weight_data").insert({"user_name": "小夏", "weight_date": str(dt), "weight": val}).execute()
                 st.rerun()
-    else:
-        st.info("💡 小耗子分区无需记录体重。")
+    else: st.info("💡 小耗子分区无需记录体重。")
 
-with tab3:
-    st.image("https://img.picgo.net/2024/05/22/fireworks_kimono_anime18090543e86c0757.md.png", use_container_width=True)
-
+with tab3: st.image("https://img.picgo.net/2024/05/22/fireworks_kimono_anime18090543e86c0757.md.png", use_container_width=True)
 with tab4:
     if st.text_input("授权码", type="password") == "wwhaxxy1314":
         st.balloons()
         st.markdown('<div class="diary-card">2026, 重逢在即。加油！</div>', unsafe_allow_html=True)
-
