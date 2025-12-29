@@ -178,80 +178,76 @@ with tab2:
     if current_user == "小夏":
         st.markdown("### 📉 减脂美学：目标 55.0 kg")
         
-        # 1. 核心计算与显示
+        # 1. 数据预处理
         if 'weight_data_list' in st.session_state and st.session_state.weight_data_list:
             df_w = pd.DataFrame(st.session_state.weight_data_list)
             
-            # 严格预处理：1.转日期 2.排序 3.同一天去重（保留最新录入）
+            # 转换日期并去重（防止同一天多个点导致斜率计算错误）
             df_w['日期'] = pd.to_datetime(df_w['日期'])
             calc_df = df_w.sort_values('日期').drop_duplicates('日期', keep='last')
             
-            # 获取预测结果
+            # 计算斜率与预测
             pred_res, slope = get_prediction(calc_df)
             
-            # 指标展示
+            # 指标列
             c1, c2, c3 = st.columns(3)
             current_w = calc_df['体重'].iloc[-1]
             diff = round(current_w - 55.0, 1)
             
             c1.metric("当前斜率", f"{slope:.3f} kg/d")
-            c2.metric("距离 55kg", f"{diff} kg", delta=f"{slope:.3f}", delta_color="inverse")
+            c2.metric("距离目标", f"{diff} kg", delta=f"{slope:.3f}", delta_color="inverse")
             
-            # 预测日期显示逻辑修复
             if diff <= 0:
-                c3.success("🎉 已达成目标！")
+                c3.success("🎉 已达成 55kg！")
             elif isinstance(pred_res, datetime.date):
-                c3.metric("预估达标日", pred_res.strftime('%Y-%m-%d'))
+                c3.metric("达标预估", pred_res.strftime('%Y-%m-%d'))
             else:
-                c3.metric("预估达标日", "需持续记录趋势")
+                c3.metric("达标预估", "趋势平缓")
 
             # 趋势图
-            fig = px.line(calc_df, x="日期", y="体重", markers=True, 
-                         color_discrete_sequence=['#ff6b81'], title="体重趋势（已去重）")
-            fig.add_hline(y=55.0, line_dash="dot", line_color="green", annotation_text="目标 55kg")
+            fig = px.line(calc_df, x="日期", y="体重", markers=True, color_discrete_sequence=['#ff6b81'])
+            fig.add_hline(y=55.0, line_dash="dot", line_color="green", annotation_text="55kg目标")
             st.plotly_chart(fig, use_container_width=True)
             
-            # --- 2. 新增：历史数据编辑器（解决冲突的关键） ---
-            with st.expander("🛠️ 历史数据管理（可删除录错的数据）"):
-                st.write("如果某天录入错误导致趋势异常，请删除对应记录：")
-                # 按时间倒序显示，方便操作
-                display_df = calc_df.sort_values('日期', ascending=False)
-                for _, row in display_df.iterrows():
-                    col_date, col_val, col_btn = st.columns([2, 2, 1])
-                    col_date.write(row['日期'].strftime('%Y-%m-%d'))
-                    col_val.write(f"{row['体重']} kg")
-                    # 使用数据库 id 进行精准删除
-                    if col_btn.button("🗑️ 删除", key=f"del_{row.get('id', row['日期'])}"):
-                        try:
-                            # 假设你的 weight_data 表主键是 id
-                            supabase.table("weight_data").delete().eq("id", row['id']).execute()
-                            st.success("已删除，正在同步...")
+            # 2. 历史数据编辑器（解决数字冲突的关键）
+            with st.expander("🛠️ 历史数据管理（可删除重复/错误记录）"):
+                st.write("点击删除按钮清理 29、30 号冲突的数据：")
+                # 倒序排列，让最新的录入在最上面
+                edit_df = calc_df.sort_values('日期', ascending=False)
+                for _, row in edit_df.iterrows():
+                    col1, col2, col3 = st.columns([2, 2, 1])
+                    col1.write(row['日期'].strftime('%Y-%m-%d'))
+                    col2.write(f"{row['体重']} kg")
+                    
+                    # 关键修复：确保删除时 eq("id", ...) 匹配正确
+                    if col3.button("🗑️ 删除", key=f"del_id_{row['id']}"):
+                        # 转换 id 为原生类型防止 pandas 对象报错
+                        record_id = int(row['id']) if not isinstance(row['id'], str) else row['id']
+                        response = supabase.table("weight_data").delete().eq("id", record_id).execute()
+                        
+                        if response:
+                            st.success("删除成功！正在重算趋势...")
                             st.rerun()
-                        except:
-                            st.error("删除失败，请检查数据库权限")
-
+                        else:
+                            st.error("删除失败，请运行上方提供的 SQL 重置权限。")
         else:
-            st.info("暂无体重数据。")
+            st.info("尚未录入体重数据。")
 
-        # 3. 数据录入表单
-        with st.form("w_form_fixed", clear_on_submit=True):
+        # 3. 录入表单
+        with st.form("weight_entry_form", clear_on_submit=True):
             st.markdown("#### ⚖️ 录入新数据")
-            col_a, col_b = st.columns(2)
-            val = col_a.number_input("体重 (kg)", value=60.0, step=0.1)
-            dt = col_b.date_input("日期", datetime.date.today())
+            ca, cb = st.columns(2)
+            new_val = ca.number_input("体重 (kg)", value=60.0, step=0.1)
+            new_dt = cb.date_input("测量日期", datetime.date.today())
             if st.form_submit_button("保存到云端"):
-                try:
-                    supabase.table("weight_data").insert({
-                        "user_name": "小夏", 
-                        "weight_date": str(dt), 
-                        "weight": val
-                    }).execute()
-                    st.success("保存成功！")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"同步失败: {e}")
+                supabase.table("weight_data").insert({
+                    "user_name": "小夏", 
+                    "weight_date": str(new_dt), 
+                    "weight": new_val
+                }).execute()
+                st.rerun()
     else:
-        st.info("💡 小耗子，这是小夏的减脂专区。你可以在【时光机】里帮她复盘。")
+        st.info("💡 小耗子，请在【时光机】查看小夏的减脂细节并给予审计建议。")
 
 with tab3:
     st.markdown("## 🎆 东京冒险清单：夏日花火之约")
@@ -268,6 +264,7 @@ with tab4:
     if st.text_input("授权码", type="password") == "wwhaxxy1314":
         st.balloons()
         st.markdown('<div class="diary-card">2026, 我们东京见。</div>', unsafe_allow_html=True)
+
 
 
 
