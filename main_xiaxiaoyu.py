@@ -176,20 +176,70 @@ with tab1:
 
 with tab2:
     if current_user == "小夏":
-        df_w = pd.DataFrame(st.session_state.weight_data_list)
-        if not df_w.empty:
+        st.markdown("### 📉 减脂美学：目标 55.0 kg")
+        
+        # 1. 确保数据存在且格式正确
+        if 'weight_data_list' in st.session_state and st.session_state.weight_data_list:
+            df_w = pd.DataFrame(st.session_state.weight_data_list)
+            
+            # 数据清洗：转换日期 -> 排序 -> 去重（同一天只取最后一次录入）
             df_w['日期'] = pd.to_datetime(df_w['日期'])
             calc_df = df_w.sort_values('日期').drop_duplicates('日期', keep='last')
+            
+            # 2. 获取预测数据
             pred_res, slope = get_prediction(calc_df)
+            
+            # 3. 布局核心指标
             c1, c2, c3 = st.columns(3)
-            c1.metric("体重斜率", f"{slope:.3f}"); c2.metric("距离目标", f"{round(calc_df['体重'].iloc[-1] - 55.0, 1)} kg"); c3.metric("达标预估", pred_res.strftime('%Y-%m-%d') if pred_res else "计算中")
-            st.plotly_chart(px.line(calc_df, x="日期", y="体重", markers=True, color_discrete_sequence=['#ff6b81']), use_container_width=True)
-        with st.form("w_form"):
-            val = st.number_input("录入体重 (kg)", 60.0, step=0.1); dt = st.date_input("测量日期", datetime.date.today())
-            if st.form_submit_button("更新"):
-                supabase.table("weight_data").insert({"user_name": "小夏", "weight_date": str(dt), "weight": val}).execute()
-                st.rerun()
-    else: st.info("💡 小耗子分区，请在 Tab1 专注学术时长记录。")
+            current_w = calc_df['体重'].iloc[-1]
+            diff = round(current_w - 55.0, 1)
+            
+            # 体重斜率 (kg/天)
+            c1.metric("体重斜率", f"{slope:.3f}", delta=None)
+            
+            # 距离目标，delta 颜色反转（减少是好事，显示绿色）
+            c2.metric("距离目标", f"{diff} kg", delta=f"{slope:.3f} /d", delta_color="inverse")
+            
+            # 达标预测显示
+            if diff <= 0:
+                c3.success("🎉 已达成 55kg！")
+            elif isinstance(pred_res, datetime.date):
+                c3.metric("达标预估", pred_res.strftime('%Y-%m-%d'))
+            else:
+                c3.metric("达标预估", "趋势平缓/计算中")
+
+            # 4. 绘制趋势图
+            # 增加 55kg 目标参考线
+            fig = px.line(calc_df, x="日期", y="体重", 
+                         title="体重随时间变化曲线 (目标: 55kg)",
+                         markers=True, 
+                         color_discrete_sequence=['#ff6b81'])
+            fig.add_hline(y=55.0, line_dash="dot", line_color="green", annotation_text="目标线")
+            st.plotly_chart(fig, use_container_width=True)
+            
+        else:
+            st.info("尚未发现体重数据，请在下方录入。")
+
+        # 5. 录入表单
+        with st.form("w_form_fixed"):
+            st.markdown("#### ⚖️ 更新数据")
+            col_a, col_b = st.columns(2)
+            val = col_a.number_input("体重 (kg)", value=60.0, min_value=40.0, max_value=120.0, step=0.1)
+            dt = col_b.date_input("测量日期", datetime.date.today())
+            if st.form_submit_button("同步到云端"):
+                # 提交到 Supabase
+                try:
+                    supabase.table("weight_data").insert({
+                        "user_name": "小夏", 
+                        "weight_date": str(dt), 
+                        "weight": val
+                    }).execute()
+                    st.success("数据同步成功！")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"同步失败: {e}")
+    else:
+        st.info("💡 小耗子分区。请去【时光机】检查小夏的减脂明细并给予鼓励。")
 
 with tab3:
     st.markdown("## 🎆 东京冒险清单：夏日花火之约")
@@ -206,4 +256,5 @@ with tab4:
     if st.text_input("授权码", type="password") == "wwhaxxy1314":
         st.balloons()
         st.markdown('<div class="diary-card">2026, 我们东京见。</div>', unsafe_allow_html=True)
+
 
