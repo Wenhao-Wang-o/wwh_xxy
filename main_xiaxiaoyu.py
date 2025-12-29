@@ -3,115 +3,220 @@ import pandas as pd
 import plotly.express as px
 from openai import OpenAI
 import datetime
-from PIL import Image
+import numpy as np
+import requests
 
-# --- 1. 空间基础配置 ---
-st.set_page_config(page_title="2026东京之约-专属空间", layout="wide")
+# --- 0. 核心配置 ---
+DEFAULT_API_KEY = "sk-051a17fa2f404ba2a9459d5f356de93b"
+LOVE_START_DATE = datetime.date(2025, 1, 1)
 
-# 初始化数据
-if 'daily_logs' not in st.session_state:
-    st.session_state.daily_logs = pd.DataFrame(columns=["日期", "项目", "详情", "心情"])
-if 'weight_history' not in st.session_state:
-    st.session_state.weight_history = pd.DataFrame([{"日期": "2025-01-01", "体重": 65.0}])
+# --- 1. 基础配置与高级 UI 美化 ---
+st.set_page_config(page_title="2026东京之约 | 专属空间", layout="wide", page_icon="🗼")
 
-# --- 2. 侧边栏：我们的画像与倒计时 ---
-with st.sidebar:
-    st.title("🗼 东京重逢计划")
+st.markdown(f"""
+    <style>
+    .stApp {{ background: linear-gradient(135deg, #fff5f7 0%, #f0f4ff 100%); }}
+    [data-testid="stMetric"] {{
+        background-color: rgba(255, 255, 255, 0.7) !important;
+        border-radius: 20px !important;
+        padding: 20px !important;
+        text-align: center !important;
+    }}
+    [data-testid="stMetricValue"] > div {{ display: flex !important; justify-content: center !important; color: #ff6b81 !important; }}
+    [data-testid="stMetricLabel"] > div {{ display: flex !important; justify-content: center !important; color: #6a89cc !important; }}
+    h1, h2, h3 {{ color: #ff6b81 !important; text-align: center !important; }}
+    .stButton>button {{ width: 100%; border-radius: 25px !important; background-color: #ff6b81 !important; color: white !important; border: none !important; height: 3em; }}
 
-    # 放置两人的相片 (请将图片文件名替换为你的本地路径)
-    col_a, col_b = st.columns(2)
-    with col_a:
-        st.image("https://via.placeholder.com/150?text=His+Photo", caption="你")
-    with col_b:
-        st.image("https://via.placeholder.com/150?text=Her+Photo", caption="她")
-
-    # 倒计时逻辑
-    target_date = datetime.date(2026, 6, 23)
-    today = datetime.date.today()
-    days_left = (target_date - today).days
-    st.metric("距离东京重逢还有", f"{days_left} 天")
-
-    st.divider()
-    api_key = st.text_input("🔑 激活 AI 守护 (API Key)", type="password")
-
-    # 减脂进度雷达
-    st.subheader("📊 减脂与互动看板")
-    # 这里的指标可以根据每天存储的事情自动计算
-    radar_df = pd.DataFrame({
-        "项目": ["运动频率", "饮食控制", "沟通时长", "心情指数", "东京期待值"],
-        "分值": [70, 60, 95, 80, 100]
-    })
-    fig_radar = px.line_polar(radar_df, r='分值', theta='项目', line_close=True, range_r=[0, 100])
-    st.plotly_chart(fig_radar, use_container_width=True)
+    /* 相册卡片样式 */
+    .photo-card {{
+        background: white; padding: 10px; border-radius: 15px; border: 1px solid #ffe4e8;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.05); margin-bottom: 10px;
+    }}
+    </style>
+    """, unsafe_allow_html=True)
 
 
-# --- 3. AI 调用：暖心陪练模式 ---
-def ask_ai_coach(prompt):
-    if not api_key: return "请先在侧边栏输入 Key 激活 AI 老师"
+# --- 2. 工具函数 ---
+def get_weather(city_pinyin):
+    api_key = "3f4ff1ded1a1a5fc5335073e8cf6f722"
+    url = f"http://api.openweathermap.org/data/2.5/weather?q={city_pinyin}&appid={api_key}&units=metric&lang=zh_cn"
     try:
-        client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
-        sys_role = f"你是一个既温柔又专业的异地恋陪跑AI。由于你的女主人要在2026年6月23日去东京见男主人，她现在的体重是{st.session_state.weight_history.iloc[-1]['体重']}kg，目标是55kg。请根据她输入的内容给出鼓励和建议。"
-        response = client.chat.completions.create(
-            model="deepseek-chat",
-            messages=[{"role": "system", "content": sys_role}, {"role": "user", "content": prompt}]
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        return f"AI 正在休息: {str(e)}"
+        res = requests.get(url, timeout=3).json()
+        return {"temp": res['main']['temp'], "desc": res['weather'][0]['description'],
+                "icon": res['weather'][0]['icon']}
+    except:
+        return None
 
 
-# --- 4. 主界面：记录与统计 ---
-st.title("💑 我们的小空间：从 2025/1/1 到 东京铁塔")
+def get_prediction(df):
+    if len(df) < 2: return None, 0
+    try:
+        temp_df = df.copy()
+        temp_df['日期_ts'] = pd.to_datetime(temp_df['日期']).map(datetime.date.toordinal)
+        x, y = temp_df['日期_ts'].values, temp_df['体重'].values.astype(float)
+        slope, intercept = np.polyfit(x, y, 1)
+        if slope < 0:
+            target_date = datetime.date.fromordinal(int((55.0 - intercept) / slope))
+            return target_date, slope
+        return "趋势平缓", slope
+    except:
+        return None, 0
 
-tab1, tab2, tab3 = st.tabs(["📅 每日生活记录", "📈 减脂统计表", "🗼 东京攻略"])
+
+# --- 3. 数据初始化 ---
+if 'weight_data_list' not in st.session_state:
+    st.session_state.weight_data_list = [{"日期": "2025-12-28", "体重": 65.0, "心情": "😊"}]
+if 'daily_logs' not in st.session_state:
+    st.session_state.daily_logs = []
+if 'photos' not in st.session_state:
+    st.session_state.photos = []  # 用于存储图片对象
+
+# --- 4. 侧边栏 ---
+with st.sidebar:
+    st.markdown("<h2 style='text-align: center;'>🗼 状态监控</h2>", unsafe_allow_html=True)
+    days_left = (datetime.date(2026, 6, 23) - datetime.date.today()).days
+    st.metric("距离重逢还有", f"{days_left} 天")
+    st.progress(max(0, min(100, 100 - int(days_left / 540 * 100))))
+    st.divider()
+    st.markdown("<p style='text-align: center; font-weight: bold;'>🌍 时空同步</p>", unsafe_allow_html=True)
+    w_tokyo, w_shantou = get_weather("Tokyo"), get_weather("Shantou")
+    c1, c2 = st.columns(2)
+    if w_tokyo: c1.markdown(
+        f"<div style='text-align:center;'><img src='http://openweathermap.org/img/wn/{w_tokyo['icon']}.png' width='40'><br>东京<br>{w_tokyo['temp']}°C</div>",
+        unsafe_allow_html=True)
+    if w_shantou: c2.markdown(
+        f"<div style='text-align:center;'><img src='http://openweathermap.org/img/wn/{w_shantou['icon']}.png' width='40'><br>汕头<br>{w_shantou['temp']}°C</div>",
+        unsafe_allow_html=True)
+    st.divider()
+    api_key_input = st.text_input("🔑 小耗子专属秘钥", value=DEFAULT_API_KEY, type="password")
+
+# --- 5. 主界面 ---
+st.markdown("<h1 style='text-align: center;'>💖 小耗子和小夏的秘密基地</h1>", unsafe_allow_html=True)
+
+# 恋爱天数统计
+days_together = (datetime.date.today() - LOVE_START_DATE).days
+st.markdown(f"### 我们已经相爱了 {days_together} 天 🎉")
+st.markdown("---")
+
+tab1, tab2, tab3, tab4 = st.tabs(["🌸 生活时光机", "📉 数学减脂美学", "🎒 东京大冒险", "💌 元旦秘密信箱"])
 
 with tab1:
-    col_l, col_r = st.columns([2, 1])
-    with col_l:
-        st.subheader("✍️ 记录我们的一天")
-        with st.form("daily_form", clear_on_submit=True):
-            item = st.selectbox("类型", ["运动", "饮食", "心情", "异地日常"])
-            detail = st.text_area("发生了什么？(比如吃了什么，走了多少步)")
-            mood = st.select_slider("今日心情", options=["😢", "😟", "😐", "😊", "🥰"])
-            submitted = st.form_submit_button("存入时光机")
-            if submitted:
-                new_data = pd.DataFrame([{"日期": today, "项目": item, "详情": detail, "心情": mood}])
-                st.session_state.daily_logs = pd.concat([st.session_state.daily_logs, new_data], ignore_index=True)
-                st.balloons()
+    # 调整为三列：左侧相册 | 中间录入 | 右侧AI分析
+    col_photo, col_log, col_ai = st.columns([1, 1.5, 1])
 
-        st.subheader("📜 历史存根")
-        st.dataframe(st.session_state.daily_logs, use_container_width=True)
+    # --- 左侧：相册专区 ---
+    with col_photo:
+        st.markdown("### 📸 专属相册")
+        new_photo = st.file_uploader("添加合照", type=["png", "jpg", "jpeg"], key="uploader")
+        if new_photo:
+            if new_photo not in st.session_state.photos:
+                st.session_state.photos.append(new_photo)
 
-    with col_r:
-        st.subheader("💡 AI 老师的私教建议")
-        if not st.session_state.daily_logs.empty:
-            last_event = st.session_state.daily_logs.iloc[-1]['详情']
-            if st.button("获取今日建议"):
-                feedback = ask_ai_coach(f"这是她今天的记录：{last_event}。请点评并给于减肥建议。")
-                st.info(feedback)
+        # 倒序显示，最新的在上面
+        if st.session_state.photos:
+            for p in reversed(st.session_state.photos):
+                st.markdown('<div class="photo-card">', unsafe_allow_html=True)
+                st.image(p, use_container_width=True)
+                st.markdown('</div>', unsafe_allow_html=True)
+        else:
+            st.info("还没有照片，上传我们的第一张合照吧！")
+
+    # --- 中间：生活记录 ---
+    with col_log:
+        with st.form("daily_form_v10", clear_on_submit=True):
+            st.subheader("📝 记录今日点滴")
+            log_date = st.date_input("日期", datetime.date.today())
+            sports = st.multiselect("🏃 运动健身", ["呼啦圈", "散步", "打羽毛球"])
+            sport_time = st.slider("⏱️ 运动时长 (分钟)", 0, 120, 30)
+            diet = st.select_slider("🥗 饮食控制", options=["放纵餐🍕", "正常饮食🍚", "清淡少油🥗", "严格减脂🥦"],
+                                    value="正常饮食🍚")
+            st.write("---")
+            ch1, ch2 = st.columns(2)
+            is_poop = ch1.radio("💩 今日是否大便？", ["未排便", "顺利排便 ✅"], horizontal=True)
+            water = ch2.slider("💧 饮水量 (L)", 0.5, 4.0, 2.0, 0.5)
+            st.write("---")
+            work = st.multiselect("💻 工作与学术", ["看文献", "写大论文", "写小论文", "阅读就业信息"])
+            work_focus = st.select_slider("🎯 专注情况", options=["走神😴", "断续☕", "专注📚", "心流🔥"], value="专注📚")
+            work_time = st.slider("⏳ 累计时长 (小时)", 0.0, 14.0, 4.0, step=0.5)
+            detail = st.text_area("💌 碎碎念...", placeholder="给小耗子的留言...")
+            mood = st.select_slider("✨ 心情", options=["😢", "😟", "😐", "😊", "🥰"], value="😊")
+            if st.form_submit_button("存入时光机"):
+                st.session_state.daily_logs.append({
+                    "日期": str(log_date), "运动": f"{'|'.join(sports)}({sport_time}min)",
+                    "饮食": diet, "大便": is_poop, "饮水": water,
+                    "工作": f"{'|'.join(work)}({work_time}h - {work_focus})", "详情": detail, "心情": mood
+                })
+                st.rerun()
+
+        if st.session_state.daily_logs:
+            for log in reversed(st.session_state.daily_logs):
+                with st.expander(f"📅 {log['日期']} - {log['心情']}"):
+                    st.write(f"**运动/饮食:** {log['运动']} | {log['饮食']}")
+                    st.write(f"**肠道/饮水:** {log['大便']} | {log['饮水']}L")
+                    if log['详情']: st.info(f"💌 {log['详情']}")
+
+    # --- 右侧：AI分析 ---
+    with col_ai:
+        st.markdown("### 🤖 小耗子审计")
+        if st.button("生成今日审计报告", use_container_width=True):
+            if not st.session_state.daily_logs:
+                st.warning("请先记录日记")
+            else:
+                try:
+                    df_w = pd.DataFrame(st.session_state.weight_data_list)
+                    pred_date, slope = get_prediction(df_w)
+                    last = st.session_state.daily_logs[-1]
+                    client = OpenAI(api_key=api_key_input, base_url="https://api.deepseek.com")
+                    prompt = f"你是‘小耗子’。体重{df_w['体重'].iloc[-1]}kg，斜率{slope:.3f}。排便{last['大便']}，饮水{last['饮水']}L。饮食{last['饮食']}，工作{last['工作']}，运动{last['运动']}。心情{last['心情']}。请给出200字内幽默、严谨且不肉麻的审计建议。"
+                    response = client.chat.completions.create(model="deepseek-chat", messages=[
+                        {"role": "system", "content": "你是一个理性的理科生伴侣。"},
+                        {"role": "user", "content": prompt}])
+                    st.info(response.choices[0].message.content)
+                except:
+                    st.error("AI连接失败")
 
 with tab2:
-    st.subheader("📉 体重变化曲线")
-    new_w = st.number_input("今日更新体重 (kg)", value=65.0, step=0.1)
-    if st.button("记录体重"):
-        new_weight_data = pd.DataFrame([{"日期": str(today), "体重": new_w}])
-        st.session_state.weight_history = pd.concat([st.session_state.weight_history, new_weight_data],
-                                                    ignore_index=True)
-
-    fig_weight = px.line(st.session_state.weight_history, x="日期", y="体重", title="迈向 55kg 目标线", markers=True)
-    fig_weight.add_hline(y=55.0, line_dash="dot", annotation_text="目标 55kg", line_color="green")
-    st.plotly_chart(fig_weight, use_container_width=True)
-
-    st.subheader("📊 数据统计表")
-    st.table(st.session_state.weight_history)
+    df_weight = pd.DataFrame(st.session_state.weight_data_list)
+    df_weight['日期'] = pd.to_datetime(df_weight['日期'])
+    calc_df = df_weight.sort_values('日期').drop_duplicates('日期', keep='last')
+    pred_res, slope = get_prediction(calc_df)
+    st.markdown("### 📈 减脂数学模型")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("日均斜率", f"{slope:.3f}")
+    c2.metric("待减体重", f"{round(calc_df['体重'].iloc[-1] - 55.0, 1)} kg")
+    c3.metric("预测达标", pred_res.strftime('%Y-%m-%d') if isinstance(pred_res, datetime.date) else "计算中")
+    with st.form("weight_v10"):
+        cw1, cw2 = st.columns(2)
+        nw, nd = cw1.number_input("体重 (kg)", value=float(calc_df['体重'].iloc[-1]), step=0.1), cw2.date_input("日期",
+                                                                                                                datetime.date.today())
+        if st.form_submit_button("同步数据"):
+            st.session_state.weight_data_list.append({"日期": str(nd), "体重": nw})
+            st.rerun()
+    st.plotly_chart(px.line(calc_df, x="日期", y="体重", markers=True, color_discrete_sequence=['#ff6b81']),
+                    use_container_width=True)
 
 with tab3:
-    st.subheader("🗼 我们的东京约定清单")
-    st.markdown("""
-    - [ ] 在东京铁塔下拍一张合照
-    - [ ] 穿上 55kg 时买的那件裙子
-    - [ ] 吃一次并不增肥的顶级刺身大餐
-    """)
-    st.image(
-        "https://images.unsplash.com/photo-1540959733332-eab4deabeeaf?ixlib=rb-4.0.3&auto=format&fit=crop&w=1194&q=80",
-        caption="期待我们的重逢")
+    st.markdown("## 🎆 东京冒险清单：夏日花火之约")
+    ca1, ca2 = st.columns([1, 1])
+    with ca1:
+        st.markdown("### 🎯 我们的约定")
+        st.checkbox("✨ 在夏夜的东京参加一场盛大的花火大会！", value=False)
+        st.write("已规划最佳观赏位，浴衣待命中。")
+    with ca2: st.image("https://img.picgo.net/2024/05/22/fireworks_kimono_anime18090543e86c0757.md.png",
+                       use_container_width=True)
+
+with tab4:
+    st.markdown("## 📟 2026 跨年系统指令")
+    input_pass = st.text_input("输入 Access Code：", type="password")
+    if input_pass == "wwhaxxy1314":
+        st.balloons()
+        st.markdown(f"""
+        <div style="background-color: #f8f9fa; padding: 25px; border-radius: 15px; border: 1px solid #dee2e6; font-family: monospace;">
+            <h3>> SYSTEM_MSG: 2026.01.01</h3><hr>
+            <p>TO: 小夏 | STATUS: 2025年度任务完成<br><br>
+            数据同步正常。重逢概率推演：99.99%。<br>
+            新年指令：维持斜率，补充水分，遇到Bug及时反馈。<br>
+            我们在终点见。<br><br>
+            —— [运维负责人: 小耗子 🐭]</p>
+        </div>
+        """, unsafe_allow_html=True)
