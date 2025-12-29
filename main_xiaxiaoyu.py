@@ -84,6 +84,9 @@ load_all_data(current_user)
 st.markdown("<div style='text-align:center; padding:10px; border-radius:15px; background: rgba(255,107,129,0.1); border: 1px dashed #ff6b81; margin-bottom: 20px;'><span style='color: #ff6b81; font-weight: bold;'>🔒 小夏 ❤️ 小耗子 的私人领地</span></div>", unsafe_allow_html=True)
 st.markdown(f"<h1>💖 {current_user} 的专属分区</h1>", unsafe_allow_html=True)
 
+days_together = (datetime.date.today() - LOVE_START_DATE).days
+st.markdown(f"<p style='text-align:center;'>这是我们守护彼此的第 {days_together} 天 🎉</p>", unsafe_allow_html=True)
+
 tab1, tab2, tab3, tab4 = st.tabs(["🌸 时光机", "📉 减脂美学", "🎒 东京冒险", "💌 元旦信箱"])
 
 with tab1:
@@ -128,12 +131,40 @@ with tab1:
                 }).execute()
                 st.rerun()
 
+        st.divider()
+        st.subheader("📜 历史存证")
+        if st.session_state.daily_logs:
+            for log in st.session_state.daily_logs[:10]: # 保持显示最近记录
+                with st.expander(f"📅 {log['log_date']} - 心情: {log['mood']}"):
+                    # 左右布局，左侧显示信息，右侧放置删除按钮
+                    c_info, c_del = st.columns([4, 1])
+                    with c_info:
+                        if current_user == "小夏":
+                            st.write(f"🍱 **饮食:** {log.get('diet_detail', '未记录')}")
+                            st.write(f"💩 **排便:** {log['is_poop']} | 💧 **饮水:** {log['water']}L")
+                        st.write(f"🏃 **运动:** {log['sports']} ({log.get('sport_minutes')}min)")
+                        st.write(f"📚 **学术:** {log.get('work')} ({log.get('academic_hours')}h - {log.get('focus_level')})")
+                        if log['detail']: st.markdown(f'<div class="diary-card">💌 {log["detail"]}</div>', unsafe_allow_html=True)
+                    
+                    with c_del:
+                        # 物理删除按钮：针对日记表的删除
+                        if st.button("🗑️ 删除记录", key=f"del_log_{log['id']}"):
+                            # 将 id 转换为原生格式防止报错
+                            log_id = int(log['id']) if not isinstance(log['id'], str) else log['id']
+                            response = supabase.table("daily_logs").delete().eq("id", log_id).execute()
+                            if response:
+                                st.success("记录已抹除")
+                                st.rerun()
+                            else:
+                                st.error("删除失败，请检查数据库权限")
+        else:
+            st.info("时光机里空空如也，快去记录今天吧~")
+
     with col_r:
         st.markdown("### 🤖 十日综合审计专家")
         if st.button("生成深度分析报告", use_container_width=True):
             if api_key_input and st.session_state.daily_logs:
                 with st.spinner("正在复盘近十天数据..."):
-                    # 提取近10天数据
                     history_logs = st.session_state.daily_logs[:10]
                     weight_df = pd.DataFrame(st.session_state.weight_data_list)
                     _, slope = get_prediction(weight_df)
@@ -151,12 +182,7 @@ with tab1:
                         历史数据：{history_str}
                         当前体重斜率：{slope:.3f}
                         
-                        要求：
-                        1. 综合分析饮食明细与【排便情况】的相关性。
-                        2. 分析饮水量、运动时长对【体重斜率】的影响。
-                        3. 观察【专注情况】与【心情】的波动规律。
-                        4. 给出未来一周的综合建议（包括饮食调整、水分摄入建议）。
-                        语气要严谨、理性、有数据支撑，但透着对小夏的关心。
+                        要求：结合饮食和排便情况，从营养学和能量代谢角度给出一个理性的分析（比如纤维摄入是否足够），并以温暖的语气给出建议。语气要严谨、理性、有数据支撑。
                         """
                     else:
                         prompt = f"你是小夏。请分析小耗子近10天的兼职与学术时长数据：{history_str}。评价他的勤奋程度并嘱咐他平衡心情与休息。"
@@ -164,32 +190,17 @@ with tab1:
                     response = client.chat.completions.create(model="deepseek-chat", messages=[{"role": "user", "content": prompt}])
                     st.markdown(f'<div class="report-box">{response.choices[0].message.content}</div>', unsafe_allow_html=True)
 
-        st.divider()
-        st.subheader("📜 历史存证")
-        for log in st.session_state.daily_logs[:5]: # 仅显示最近5条防止过长
-            with st.expander(f"📅 {log['log_date']} - {log['mood']}"):
-                if current_user == "小夏":
-                    st.write(f"🍱 **饮食:** {log.get('diet_detail', '未记录')}")
-                    st.write(f"💩 **排便:** {log['is_poop']} | 💧 **饮水:** {log['water']}L")
-                st.write(f"🏃 **运动:** {log['sports']} ({log.get('sport_minutes')}min)")
-                st.write(f"📚 **学术:** {log.get('academic_hours')}h ({log.get('focus_level')})")
-
 with tab2:
     if current_user == "小夏":
         st.markdown("### 📉 减脂美学：目标 55.0 kg")
         
-        # 1. 数据预处理
         if 'weight_data_list' in st.session_state and st.session_state.weight_data_list:
             df_w = pd.DataFrame(st.session_state.weight_data_list)
-            
-            # 转换日期并去重（防止同一天多个点导致斜率计算错误）
             df_w['日期'] = pd.to_datetime(df_w['日期'])
             calc_df = df_w.sort_values('日期').drop_duplicates('日期', keep='last')
             
-            # 计算斜率与预测
             pred_res, slope = get_prediction(calc_df)
             
-            # 指标列
             c1, c2, c3 = st.columns(3)
             current_w = calc_df['体重'].iloc[-1]
             diff = round(current_w - 55.0, 1)
@@ -204,36 +215,27 @@ with tab2:
             else:
                 c3.metric("达标预估", "趋势平缓")
 
-            # 趋势图
             fig = px.line(calc_df, x="日期", y="体重", markers=True, color_discrete_sequence=['#ff6b81'])
             fig.add_hline(y=55.0, line_dash="dot", line_color="green", annotation_text="55kg目标")
             st.plotly_chart(fig, use_container_width=True)
             
-            # 2. 历史数据编辑器（解决数字冲突的关键）
             with st.expander("🛠️ 历史数据管理（可删除重复/错误记录）"):
-                st.write("点击删除按钮清理 29、30 号冲突的数据：")
-                # 倒序排列，让最新的录入在最上面
                 edit_df = calc_df.sort_values('日期', ascending=False)
                 for _, row in edit_df.iterrows():
                     col1, col2, col3 = st.columns([2, 2, 1])
                     col1.write(row['日期'].strftime('%Y-%m-%d'))
                     col2.write(f"{row['体重']} kg")
-                    
-                    # 关键修复：确保删除时 eq("id", ...) 匹配正确
                     if col3.button("🗑️ 删除", key=f"del_id_{row['id']}"):
-                        # 转换 id 为原生类型防止 pandas 对象报错
                         record_id = int(row['id']) if not isinstance(row['id'], str) else row['id']
                         response = supabase.table("weight_data").delete().eq("id", record_id).execute()
-                        
                         if response:
-                            st.success("删除成功！正在重算趋势...")
+                            st.success("删除成功")
                             st.rerun()
                         else:
-                            st.error("删除失败，请运行上方提供的 SQL 重置权限。")
+                            st.error("删除失败")
         else:
             st.info("尚未录入体重数据。")
 
-        # 3. 录入表单
         with st.form("weight_entry_form", clear_on_submit=True):
             st.markdown("#### ⚖️ 录入新数据")
             ca, cb = st.columns(2)
@@ -251,7 +253,6 @@ with tab2:
 
 with tab3:
     st.markdown("## 🎆 东京冒险清单：夏日花火之约")
-    # 更换为稳定的图片链接 (Unsplash 随机动漫风格东京图)
     st.image("https://images.unsplash.com/photo-1540959733332-eab4deabeeaf?auto=format&fit=crop&w=1200&q=80", 
              caption="2026, 重逢在东京的街头", use_container_width=True)
     st.markdown("""
@@ -264,8 +265,3 @@ with tab4:
     if st.text_input("授权码", type="password") == "wwhaxxy1314":
         st.balloons()
         st.markdown('<div class="diary-card">2026, 我们东京见。</div>', unsafe_allow_html=True)
-
-
-
-
-
