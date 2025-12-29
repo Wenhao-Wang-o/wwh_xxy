@@ -191,4 +191,19 @@ with tab2:
                 st.rerun()
     else: st.info("💡 小耗子分区，请在 Tab1 专注学术时长记录。")
 
-# Tab 3 & 4 保持原有内容...
+with tab3:
+    st.markdown("## 🎆 东京冒险清单：夏日花火之约")
+    # 更换为稳定的图片链接 (Unsplash 随机动漫风格东京图)
+    st.image("https://images.unsplash.com/photo-1540959733332-eab4deabeeaf?auto=format&fit=crop&w=1200&q=80", 
+             caption="2026, 重逢在东京的街头", use_container_width=True)
+    st.markdown("""
+    - [ ] ✨ 在夏夜的东京参加一场盛大的花火大会！
+    - [ ] ✨ 穿着浴衣走在浅草寺的灯火下
+    - [ ] ✨ 找一家藏在巷子里最好吃的鳗鱼饭
+    """)
+
+with tab4:
+    if st.text_input("授权码", type="password") == "wwhaxxy1314":
+        st.balloons()
+        st.markdown('<div class="diary-card">2026, 我们东京见。</div>', unsafe_allow_html=True)
+
