@@ -82,11 +82,19 @@ with st.sidebar:
 
 load_all_data(current_user)
 
-# --- 5. 主界面 ---
-st.markdown(f"<h1>💖 {current_user} 的秘密空间</h1>", unsafe_allow_html=True)
-days_together = (datetime.date.today() - LOVE_START_DATE).days
-st.markdown(f"<p style='text-align:center;'>相爱第 {days_together} 天 🎉</p>", unsafe_allow_html=True)
+# --- 5. 主界面 ----
+# 增加一个顶级的私人空间标识
+st.markdown("""
+    <div style='text-align:center; padding:10px; border-radius:15px; background: rgba(255,107,129,0.1); border: 1px dashed #ff6b81; margin-bottom: 20px;'>
+        <span style='color: #ff6b81; font-weight: bold;'>🔒 小夏 ❤️ 小耗子 的私人领地 (Private Space)</span>
+    </div>
+    """, unsafe_allow_html=True)
 
+# 动态显示当前切分的分区标题
+st.markdown(f"<h1>💖 {current_user} 的专属分区</h1>", unsafe_allow_html=True)
+
+days_together = (datetime.date.today() - LOVE_START_DATE).days
+st.markdown(f"<p style='text-align:center;'>这是我们守护彼此的第 {days_together} 天 🎉</p>", unsafe_allow_html=True)
 tab1, tab2, tab3, tab4 = st.tabs(["🌸 时光机", "📉 减脂美学", "🎒 东京冒险", "💌 元旦信箱"])
 
 with tab1:
@@ -194,3 +202,4 @@ with tab4:
     if st.text_input("授权码", type="password") == "wwhaxxy1314":
         st.balloons()
         st.markdown('<div class="diary-card">2026, 重逢在即。加油！</div>', unsafe_allow_html=True)
+
