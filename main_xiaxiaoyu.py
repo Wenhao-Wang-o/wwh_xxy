@@ -156,40 +156,82 @@ with tab1:
                             st.rerun()
 
     with col_r:
-        st.markdown("### 🤖 十日综合审计专家")
-        if st.button("生成深度分析报告", use_container_width=True):
+        st.markdown("### 🤖 智能审计与追问")
+        
+        # 1. 初始化对话历史 (如果不存在)
+        if "chat_history" not in st.session_state:
+            st.session_state.chat_history = []
+
+        # 2. 生成初始审计报告的按钮
+        if st.button("🚀 生成深度分析复盘", use_container_width=True):
             if api_key_input and st.session_state.daily_logs:
-                with st.spinner("正在复盘近十天数据..."):
+                with st.spinner("小耗子正在复盘近十天数据..."):
                     history_logs = st.session_state.daily_logs[:10]
                     weight_df = pd.DataFrame(st.session_state.weight_data_list)
                     _, slope = get_prediction(weight_df)
                     
                     history_str = "\n".join([
-                        f"- {l['log_date']}: 饮食[{l.get('diet_detail')}] 运动[{l['sports']}] 排便[{l['is_poop']}] 饮水[{l['water']}L] 专注[{l.get('focus_level')}] 心情[{l['mood']}]"
+                        f"- {l['log_date']}: 饮食[{l.get('diet_detail')}] 运动[{l['sports']}] 排便[{l['is_poop']}] 饮水[{l['water']}L]"
                         for l in history_logs
                     ])
                     
+                    # 设定初始审计指令
+                    system_prompt = f"""
+                    你是理科伴侣小耗子。小夏正在服用【氯氮平】，目标是【坚定减重】。
+                    氯氮平会导致代谢下降、腹部脂肪堆积、肠蠕动显著减慢。请针对性分析：
+                    历史数据：{history_str}
+                    当前体重斜率：{slope:.3f}
+                    
+                    你的回复应包含：代谢分析、肠道审计（死磕排便频率）、控糖预警。
+                    """
+                    
                     client = OpenAI(api_key=api_key_input, base_url="https://api.deepseek.com")
+                    response = client.chat.completions.create(
+                        model="deepseek-chat",
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": "请基于以上数据给我一份详细审计报告。"}
+                        ]
+                    )
                     
-                    if current_user == "小夏":
-                        prompt = f"""
-                        你是理科伴侣小耗子。小夏正在服用【氯氮平】，目标是【坚定减重】。
-                        氯氮平会导致代谢下降、腹部脂肪堆积、肠蠕动显著减慢。请针对性分析：
-                        历史数据：{history_str}
-                        当前体重斜率：{slope:.3f}
+                    # 存储到历史记录
+                    st.session_state.chat_history = [
+                        {"role": "assistant", "content": response.choices[0].message.content}
+                    ]
+            else:
+                st.warning("请检查 API Key 或是否已录入数据。")
 
-                        要求：
-                        1. 【生化审计】：分析饮食明细。指出任何高糖/高碳水对胰岛素抵抗的影响。
-                        2. 【动力审计】：死磕排便频率。连续未排便必须严厉警报，并给出增加纤维和水的具体方案。
-                        3. 【减重评价】：只要斜率是负数，请给予极高的情绪价值。
-                        4. 【生活复盘】：结合专注度和心情，观察是否存在压力性代谢受损。
-                        语气：严谨、理科思维、充满对小夏的爱。
-                        """
-                    else:
-                        prompt = f"你是小夏。分析小耗子近10天数据：{history_str}。评价其勤奋度。"
-                    
-                    response = client.chat.completions.create(model="deepseek-chat", messages=[{"role": "user", "content": prompt}])
-                    st.markdown(f'<div class="report-box">{response.choices[0].message.content}</div>', unsafe_allow_html=True)
+        # 3. 展示对话流
+        st.markdown("---")
+        chat_container = st.container(height=500) # 固定高度的聊天区域
+        with chat_container:
+            for message in st.session_state.chat_history:
+                with st.chat_message(message["role"], avatar="🐭" if message["role"]=="assistant" else "🌸"):
+                    st.markdown(message["content"])
+
+        # 4. 追问输入框
+        if prompt := st.chat_input("针对审计结果，你想追问小耗子什么？"):
+            # 将用户输入加入历史
+            st.session_state.chat_history.append({"role": "user", "content": prompt})
+            with chat_container:
+                with st.chat_message("user", avatar="🌸"):
+                    st.markdown(prompt)
+
+            # 调用 AI 进行追问响应
+            with st.chat_message("assistant", avatar="🐭"):
+                with st.spinner("思考中..."):
+                    client = OpenAI(api_key=api_key_input, base_url="https://api.deepseek.com")
+                    # 发送完整的对话上下文
+                    chat_response = client.chat.completions.create(
+                        model="deepseek-chat",
+                        messages=[{"role": "system", "content": "你是一个懂药理和代谢的理科伴侣小耗子，请继续针对小夏的问题进行专业且温柔的回答。"}] + 
+                                 st.session_state.chat_history
+                    )
+                    full_response = chat_response.choices[0].message.content
+                    st.markdown(full_response)
+            
+            # 将 AI 回复加入历史
+            st.session_state.chat_history.append({"role": "assistant", "content": full_response})
 
 with tab2:
     if current_user == "小夏":
@@ -231,3 +273,4 @@ with tab3:
 with tab4:
     if st.text_input("授权码", type="password") == "wwhaxxy1314":
         st.balloons(); st.markdown('<div class="diary-card">我们在终点见。</div>', unsafe_allow_html=True)
+
