@@ -28,11 +28,6 @@ def load_all_data(user):
         st.session_state.daily_logs = l_res.data
     except Exception as e: st.error(f"加载失败: {e}")
 
-def delete_record(table_name, record_id):
-    supabase.table(table_name).delete().eq("id", record_id).execute()
-    st.success("记录已抹除 ✨")
-    st.rerun()
-
 # --- 2. 工具函数 ---
 def get_weather(city_pinyin):
     api_key = "3f4ff1ded1a1a5fc5335073e8cf6f722"
@@ -95,11 +90,7 @@ with tab1:
         with st.form("daily_form_v_master", clear_on_submit=True):
             st.subheader(f"📝 {current_user} 的深度记录")
             log_date = st.date_input("日期", datetime.date.today())
-            
-            diet_detail = ""
-            if current_user == "小夏":
-                diet_detail = st.text_area("🍱 今日饮食明细", placeholder="具体吃了什么？(如：早起黑咖啡，中午瘦肉黄豆面，晚上一根黄瓜)")
-
+            diet_detail = st.text_area("🍱 今日饮食明细", placeholder="具体吃了什么？") if current_user == "小夏" else ""
             sports = st.multiselect("🏃 运动项目", ["呼啦圈", "散步", "羽毛球", "健身房", "拉伸"])
             sport_time = st.slider("⏱️ 运动时长 (分钟)", 0, 180, 30, step=5)
             diet_type = st.select_slider("🥗 饮食控制等级", options=["放纵🍕", "正常🍚", "清淡🥗", "严格🥦"], value="正常🍚")
@@ -134,31 +125,20 @@ with tab1:
         st.divider()
         st.subheader("📜 历史存证")
         if st.session_state.daily_logs:
-            for log in st.session_state.daily_logs[:10]: # 保持显示最近记录
+            for log in st.session_state.daily_logs[:10]:
                 with st.expander(f"📅 {log['log_date']} - 心情: {log['mood']}"):
-                    # 左右布局，左侧显示信息，右侧放置删除按钮
                     c_info, c_del = st.columns([4, 1])
                     with c_info:
                         if current_user == "小夏":
                             st.write(f"🍱 **饮食:** {log.get('diet_detail', '未记录')}")
                             st.write(f"💩 **排便:** {log['is_poop']} | 💧 **饮水:** {log['water']}L")
                         st.write(f"🏃 **运动:** {log['sports']} ({log.get('sport_minutes')}min)")
-                        st.write(f"📚 **学术:** {log.get('work')} ({log.get('academic_hours')}h - {log.get('focus_level')})")
+                        st.write(f"📚 **学术:** {log.get('work')} ({log.get('academic_hours')}h)")
                         if log['detail']: st.markdown(f'<div class="diary-card">💌 {log["detail"]}</div>', unsafe_allow_html=True)
-                    
                     with c_del:
-                        # 物理删除按钮：针对日记表的删除
-                        if st.button("🗑️ 删除记录", key=f"del_log_{log['id']}"):
-                            # 将 id 转换为原生格式防止报错
-                            log_id = int(log['id']) if not isinstance(log['id'], str) else log['id']
-                            response = supabase.table("daily_logs").delete().eq("id", log_id).execute()
-                            if response:
-                                st.success("记录已抹除")
-                                st.rerun()
-                            else:
-                                st.error("删除失败，请检查数据库权限")
-        else:
-            st.info("时光机里空空如也，快去记录今天吧~")
+                        if st.button("🗑️ 删除", key=f"del_log_{log['id']}"):
+                            supabase.table("daily_logs").delete().eq("id", log['id']).execute()
+                            st.rerun()
 
     with col_r:
         st.markdown("### 🤖 十日综合审计专家")
@@ -170,7 +150,7 @@ with tab1:
                     _, slope = get_prediction(weight_df)
                     
                     history_str = "\n".join([
-                        f"- {l['log_date']}: 饮食[{l.get('diet_detail')}] 运动[{l['sports']} {l.get('sport_minutes')}min] 排便[{l['is_poop']}] 饮水[{l['water']}L] 专注[{l.get('focus_level')}] 心情[{l['mood']}]"
+                        f"- {l['log_date']}: 饮食[{l.get('diet_detail')}] 运动[{l['sports']}] 排便[{l['is_poop']}] 饮水[{l['water']}L] 专注[{l.get('focus_level')}] 心情[{l['mood']}]"
                         for l in history_logs
                     ])
                     
@@ -178,14 +158,20 @@ with tab1:
                     
                     if current_user == "小夏":
                         prompt = f"""
-                        你是理科伴侣小耗子。请根据小夏近10天的数据进行深度综合分析：
+                        你是理科伴侣小耗子。小夏正在服用【氯氮平】，目标是【坚定减重】。
+                        氯氮平会导致代谢下降、向心性腹部肥胖和严重肠蠕动减慢。请根据近10天数据进行审计：
                         历史数据：{history_str}
                         当前体重斜率：{slope:.3f}
-                        
-                        要求：结合饮食和排便情况，从营养学和能量代谢角度给出一个理性的分析（比如纤维摄入是否足够），并以温暖的语气给出建议。语气要严谨、理性、有数据支撑。
+
+                        要求：
+                        1. 【代谢分析】：结合斜率评价减重进展。氯氮平环境下，斜率为负即是胜利。
+                        2. 【肠道审计】：死磕排便频率与饮食细节。若纤维摄入不足或水分低于2.5L，给出具体物理干预方案。
+                        3. 【控糖预警】：针对药物引起的胰岛素抵抗，严厉指出记录中的精制碳水风险。
+                        4. 【心理/专注】：分析专注力与心情波动。
+                        语气要严谨、理性、有数据支持，但也透着小耗子对小夏的爱。
                         """
                     else:
-                        prompt = f"你是小夏。请分析小耗子近10天的兼职与学术时长数据：{history_str}。评价他的勤奋程度并嘱咐他平衡心情与休息。"
+                        prompt = f"你是小夏。分析小耗子近10天数据：{history_str}。评价其勤奋度。"
                     
                     response = client.chat.completions.create(model="deepseek-chat", messages=[{"role": "user", "content": prompt}])
                     st.markdown(f'<div class="report-box">{response.choices[0].message.content}</div>', unsafe_allow_html=True)
@@ -193,75 +179,42 @@ with tab1:
 with tab2:
     if current_user == "小夏":
         st.markdown("### 📉 减脂美学：目标 55.0 kg")
-        
         if 'weight_data_list' in st.session_state and st.session_state.weight_data_list:
             df_w = pd.DataFrame(st.session_state.weight_data_list)
             df_w['日期'] = pd.to_datetime(df_w['日期'])
             calc_df = df_w.sort_values('日期').drop_duplicates('日期', keep='last')
-            
             pred_res, slope = get_prediction(calc_df)
             
             c1, c2, c3 = st.columns(3)
             current_w = calc_df['体重'].iloc[-1]
-            diff = round(current_w - 55.0, 1)
-            
             c1.metric("当前斜率", f"{slope:.3f} kg/d")
-            c2.metric("距离目标", f"{diff} kg", delta=f"{slope:.3f}", delta_color="inverse")
-            
-            if diff <= 0:
-                c3.success("🎉 已达成 55kg！")
-            elif isinstance(pred_res, datetime.date):
-                c3.metric("达标预估", pred_res.strftime('%Y-%m-%d'))
-            else:
-                c3.metric("达标预估", "趋势平缓")
+            c2.metric("距离目标", f"{round(current_w - 55.0, 1)} kg", delta=f"{slope:.3f}", delta_color="inverse")
+            if isinstance(pred_res, datetime.date): c3.metric("达标预估", pred_res.strftime('%Y-%m-%d'))
 
-            fig = px.line(calc_df, x="日期", y="体重", markers=True, color_discrete_sequence=['#ff6b81'])
-            fig.add_hline(y=55.0, line_dash="dot", line_color="green", annotation_text="55kg目标")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(px.line(calc_df, x="日期", y="体重", markers=True, color_discrete_sequence=['#ff6b81']), use_container_width=True)
             
-            with st.expander("🛠️ 历史数据管理（可删除重复/错误记录）"):
-                edit_df = calc_df.sort_values('日期', ascending=False)
-                for _, row in edit_df.iterrows():
-                    col1, col2, col3 = st.columns([2, 2, 1])
-                    col1.write(row['日期'].strftime('%Y-%m-%d'))
-                    col2.write(f"{row['体重']} kg")
-                    if col3.button("🗑️ 删除", key=f"del_id_{row['id']}"):
-                        record_id = int(row['id']) if not isinstance(row['id'], str) else row['id']
-                        response = supabase.table("weight_data").delete().eq("id", record_id).execute()
-                        if response:
-                            st.success("删除成功")
-                            st.rerun()
-                        else:
-                            st.error("删除失败")
-        else:
-            st.info("尚未录入体重数据。")
-
-        with st.form("weight_entry_form", clear_on_submit=True):
-            st.markdown("#### ⚖️ 录入新数据")
+            with st.expander("🛠️ 历史数据管理"):
+                for _, row in calc_df.sort_values('日期', ascending=False).iterrows():
+                    c_d, c_v, c_b = st.columns([2, 2, 1])
+                    c_d.write(row['日期'].strftime('%Y-%m-%d'))
+                    c_v.write(f"{row['体重']} kg")
+                    if c_b.button("🗑️ 删除", key=f"del_w_{row['id']}"):
+                        supabase.table("weight_data").delete().eq("id", row['id']).execute()
+                        st.rerun()
+        
+        with st.form("weight_form_new"):
             ca, cb = st.columns(2)
             new_val = ca.number_input("体重 (kg)", value=60.0, step=0.1)
             new_dt = cb.date_input("测量日期", datetime.date.today())
-            if st.form_submit_button("保存到云端"):
-                supabase.table("weight_data").insert({
-                    "user_name": "小夏", 
-                    "weight_date": str(new_dt), 
-                    "weight": new_val
-                }).execute()
+            if st.form_submit_button("同步"):
+                supabase.table("weight_data").insert({"user_name": "小夏", "weight_date": str(new_dt), "weight": new_val}).execute()
                 st.rerun()
     else:
-        st.info("💡 小耗子，请在【时光机】查看小夏的减脂细节并给予审计建议。")
+        st.info("💡 小耗子，请在【时光机】检查小夏的减脂细节。")
 
 with tab3:
-    st.markdown("## 🎆 东京冒险清单：夏日花火之约")
-    st.image("https://images.unsplash.com/photo-1540959733332-eab4deabeeaf?auto=format&fit=crop&w=1200&q=80", 
-             caption="2026, 重逢在东京的街头", use_container_width=True)
-    st.markdown("""
-    - [ ] ✨ 在夏夜的东京参加一场盛大的花火大会！
-    - [ ] ✨ 穿着浴衣走在浅草寺的灯火下
-    - [ ] ✨ 找一家藏在巷子里最好吃的鳗鱼饭
-    """)
+    st.image("https://images.unsplash.com/photo-1540959733332-eab4deabeeaf?auto=format&fit=crop&w=1200&q=80", caption="2026, 重逢在东京", use_container_width=True)
 
 with tab4:
     if st.text_input("授权码", type="password") == "wwhaxxy1314":
-        st.balloons()
-        st.markdown('<div class="diary-card">2026, 我们东京见。</div>', unsafe_allow_html=True)
+        st.balloons(); st.markdown('<div class="diary-card">我们在终点见。</div>', unsafe_allow_html=True)
