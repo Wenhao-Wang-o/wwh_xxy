@@ -48,15 +48,31 @@ def get_prediction(df):
         return target_date, slope
     except: return None, 0
 
-# --- 3. UI 样式 ---
+# --- 3. UI 样式 (包含全自动夜间模式适配) ---
 st.set_page_config(page_title="2026东京之约", layout="wide", page_icon="🗼")
-st.markdown("""<style>
+
+st.markdown("""
+    <style>
+    /* 基础亮色模式 */
     .stApp { background: linear-gradient(135deg, #fff5f7 0%, #f0f4ff 100%); }
     h1, h2, h3 { color: #ff6b81 !important; text-align: center !important; }
+    .diary-card { background-color: #fff0f3; padding: 12px; border-radius: 12px; border-left: 4px solid #ff6b81; margin-top: 10px; color: #333; }
+    .report-box { background-color: #f0f4ff; padding: 20px; border-radius: 15px; border-left: 8px solid #6a89cc; margin-top: 20px; color: #333; }
     .stButton>button { border-radius: 25px !important; background-color: #ff6b81 !important; color: white !important; }
-    .diary-card { background-color: #fff0f3; padding: 12px; border-radius: 12px; border-left: 4px solid #ff6b81; margin-top: 10px; }
-    .report-box { background-color: #f0f4ff; padding: 20px; border-radius: 15px; border-left: 8px solid #6a89cc; margin-top: 20px; }
-    </style>""", unsafe_allow_html=True)
+    
+    /* 手机夜间模式适配 */
+    @media (prefers-color-scheme: dark) {
+        .stApp { background: linear-gradient(135deg, #1e1e1e 0%, #121212 100%) !important; }
+        .diary-card { background-color: #2d2d2d !important; color: #efefef !important; border-left: 4px solid #ff6b81 !important; }
+        .report-box { background-color: #1e2530 !important; color: #efefef !important; border-left: 8px solid #6a89cc !important; }
+        h1, h2, h3 { color: #ff8fa3 !important; }
+        /* 针对侧边栏和输入框在夜间模式的优化 */
+        [data-testid="stSidebar"] { background-color: #1a1a1a !important; }
+        .stMarkdown, p, span { color: #dddddd !important; }
+        [data-testid="stMetricValue"] { color: #ff8fa3 !important; }
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
 # --- 4. 侧边栏 ---
 with st.sidebar:
@@ -105,7 +121,6 @@ with tab1:
                 st.write("---")
                 part_time = st.number_input("⏳ 今日兼职时长 (小时)", 0.0, 14.0, 0.0, step=0.5)
             
-            st.write("---")
             work = st.multiselect("💻 学术与工作内容", ["看文献", "写论文", "找工作", "其他"])
             work_time = st.slider("⏳ 专注时长 (小时)", 0.0, 14.0, 4.0, step=0.5)
             work_focus = st.select_slider("🎯 专注状态", options=["走神😴", "断续☕", "专注📚", "心流🔥"], value="专注📚")
@@ -159,16 +174,16 @@ with tab1:
                     if current_user == "小夏":
                         prompt = f"""
                         你是理科伴侣小耗子。小夏正在服用【氯氮平】，目标是【坚定减重】。
-                        氯氮平会导致代谢下降、向心性腹部肥胖和严重肠蠕动减慢。请根据近10天数据进行审计：
+                        氯氮平会导致代谢下降、腹部脂肪堆积、肠蠕动显著减慢。请针对性分析：
                         历史数据：{history_str}
                         当前体重斜率：{slope:.3f}
 
                         要求：
-                        1. 【代谢分析】：结合斜率评价减重进展。氯氮平环境下，斜率为负即是胜利。
-                        2. 【肠道审计】：死磕排便频率与饮食细节。若纤维摄入不足或水分低于2.5L，给出具体物理干预方案。
-                        3. 【控糖预警】：针对药物引起的胰岛素抵抗，严厉指出记录中的精制碳水风险。
-                        4. 【心理/专注】：分析专注力与心情波动。
-                        语气要严谨、理性、有数据支持，但也透着小耗子对小夏的爱。
+                        1. 【生化审计】：分析饮食明细。指出任何高糖/高碳水对胰岛素抵抗的影响。
+                        2. 【动力审计】：死磕排便频率。连续未排便必须严厉警报，并给出增加纤维和水的具体方案。
+                        3. 【减重评价】：只要斜率是负数，请给予极高的情绪价值。
+                        4. 【生活复盘】：结合专注度和心情，观察是否存在压力性代谢受损。
+                        语气：严谨、理科思维、充满对小夏的爱。
                         """
                     else:
                         prompt = f"你是小夏。分析小耗子近10天数据：{history_str}。评价其勤奋度。"
@@ -209,8 +224,6 @@ with tab2:
             if st.form_submit_button("同步"):
                 supabase.table("weight_data").insert({"user_name": "小夏", "weight_date": str(new_dt), "weight": new_val}).execute()
                 st.rerun()
-    else:
-        st.info("💡 小耗子，请在【时光机】检查小夏的减脂细节。")
 
 with tab3:
     st.image("https://images.unsplash.com/photo-1540959733332-eab4deabeeaf?auto=format&fit=crop&w=1200&q=80", caption="2026, 重逢在东京", use_container_width=True)
