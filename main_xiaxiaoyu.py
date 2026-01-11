@@ -48,25 +48,22 @@ def get_prediction(df):
         return target_date, slope
     except: return None, 0
 
-# --- 3. UI 样式 (包含全自动夜间模式适配) ---
+# --- 3. UI 样式 ---
 st.set_page_config(page_title="2026东京之约", layout="wide", page_icon="🗼")
 
 st.markdown("""
     <style>
-    /* 基础亮色模式 */
     .stApp { background: linear-gradient(135deg, #fff5f7 0%, #f0f4ff 100%); }
     h1, h2, h3 { color: #ff6b81 !important; text-align: center !important; }
     .diary-card { background-color: #fff0f3; padding: 12px; border-radius: 12px; border-left: 4px solid #ff6b81; margin-top: 10px; color: #333; }
     .report-box { background-color: #f0f4ff; padding: 20px; border-radius: 15px; border-left: 8px solid #6a89cc; margin-top: 20px; color: #333; }
     .stButton>button { border-radius: 25px !important; background-color: #ff6b81 !important; color: white !important; }
     
-    /* 手机夜间模式适配 */
     @media (prefers-color-scheme: dark) {
         .stApp { background: linear-gradient(135deg, #1e1e1e 0%, #121212 100%) !important; }
         .diary-card { background-color: #2d2d2d !important; color: #efefef !important; border-left: 4px solid #ff6b81 !important; }
         .report-box { background-color: #1e2530 !important; color: #efefef !important; border-left: 8px solid #6a89cc !important; }
         h1, h2, h3 { color: #ff8fa3 !important; }
-        /* 针对侧边栏和输入框在夜间模式的优化 */
         [data-testid="stSidebar"] { background-color: #1a1a1a !important; }
         .stMarkdown, p, span { color: #dddddd !important; }
         [data-testid="stMetricValue"] { color: #ff8fa3 !important; }
@@ -107,8 +104,17 @@ with tab1:
             st.subheader(f"📝 {current_user} 的深度记录")
             log_date = st.date_input("日期", datetime.date.today())
             diet_detail = st.text_area("🍱 今日饮食明细", placeholder="具体吃了什么？") if current_user == "小夏" else ""
-            sports = st.multiselect("🏃 运动项目", ["呼啦圈", "散步", "羽毛球", "健身房", "拉伸"])
-            sport_time = st.slider("⏱️ 运动时长 (分钟)", 0, 180, 30, step=5)
+            
+            # --- 运动逻辑修改点 ---
+            sports = st.multiselect("🏃 运动项目", ["呼啦圈", "散步", "羽毛球", "健身房", "拉伸", "俯卧撑"])
+            
+            # 如果选择了俯卧撑，切换为次数输入
+            if "俯卧撑" in sports:
+                sport_time = st.number_input("💪 俯卧撑总次数", min_value=0, max_value=1000, value=30, step=5)
+            else:
+                sport_time = st.slider("⏱️ 运动时长 (分钟)", 0, 180, 30, step=5)
+            # ------------------
+
             diet_type = st.select_slider("🥗 饮食控制等级", options=["放纵🍕", "正常🍚", "清淡🥗", "严格🥦"], value="正常🍚")
             
             is_poop, water, part_time = "N/A", 0.0, 0.0
@@ -147,7 +153,12 @@ with tab1:
                         if current_user == "小夏":
                             st.write(f"🍱 **饮食:** {log.get('diet_detail', '未记录')}")
                             st.write(f"💩 **排便:** {log['is_poop']} | 💧 **饮水:** {log['water']}L")
-                        st.write(f"🏃 **运动:** {log['sports']} ({log.get('sport_minutes')}min)")
+                        
+                        # --- 历史记录单位适配 ---
+                        unit = "个" if "俯卧撑" in (log.get('sports') or "") else "min"
+                        st.write(f"🏃 **运动:** {log['sports']} ({log.get('sport_minutes')}{unit})")
+                        # -----------------------
+                        
                         st.write(f"📚 **学术:** {log.get('work')} ({log.get('academic_hours')}h)")
                         if log['detail']: st.markdown(f'<div class="diary-card">💌 {log["detail"]}</div>', unsafe_allow_html=True)
                     with c_del:
@@ -157,80 +168,44 @@ with tab1:
 
     with col_r:
         st.markdown("### 🤖 智能审计与追问")
-        
-        # 1. 初始化对话历史 (如果不存在)
         if "chat_history" not in st.session_state:
             st.session_state.chat_history = []
 
-        # 2. 生成初始审计报告的按钮
         if st.button("🚀 生成深度分析复盘", use_container_width=True):
             if api_key_input and st.session_state.daily_logs:
                 with st.spinner("小耗子正在复盘近十天数据..."):
                     history_logs = st.session_state.daily_logs[:10]
                     weight_df = pd.DataFrame(st.session_state.weight_data_list)
                     _, slope = get_prediction(weight_df)
-                    
-                    history_str = "\n".join([
-                        f"- {l['log_date']}: 饮食[{l.get('diet_detail')}] 运动[{l['sports']}] 排便[{l['is_poop']}] 饮水[{l['water']}L]"
-                        for l in history_logs
-                    ])
-                    
-                    # 设定初始审计指令
-                    system_prompt = f"""
-                    你是理科伴侣小耗子。小夏正在服用【氯氮平】，目标是【坚定减重】。
-                    氯氮平会导致代谢下降、腹部脂肪堆积、肠蠕动显著减慢。请针对性分析：
-                    历史数据：{history_str}
-                    当前体重斜率：{slope:.3f}
-                    
-                    你的回复应包含：代谢分析、肠道审计（死磕排便频率）、控糖预警。
-                    """
-                    
+                    history_str = "\n".join([f"- {l['log_date']}: 饮食[{l.get('diet_detail')}] 运动[{l['sports']}]" for l in history_logs])
+                    system_prompt = f"你是理科伴侣小耗子。小夏在用氯氮平减重。历史数据：{history_str}\n当前体重斜率：{slope:.3f}"
                     client = OpenAI(api_key=api_key_input, base_url="https://api.deepseek.com")
                     response = client.chat.completions.create(
                         model="deepseek-chat",
-                        messages=[
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": "请基于以上数据给我一份详细审计报告。"}
-                        ]
+                        messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": "请提供报告。"}]
                     )
-                    
-                    # 存储到历史记录
-                    st.session_state.chat_history = [
-                        {"role": "assistant", "content": response.choices[0].message.content}
-                    ]
-            else:
-                st.warning("请检查 API Key 或是否已录入数据。")
+                    st.session_state.chat_history = [{"role": "assistant", "content": response.choices[0].message.content}]
+            else: st.warning("请检查配置。")
 
-        # 3. 展示对话流
         st.markdown("---")
-        chat_container = st.container(height=500) # 固定高度的聊天区域
+        chat_container = st.container(height=500)
         with chat_container:
             for message in st.session_state.chat_history:
                 with st.chat_message(message["role"], avatar="🐭" if message["role"]=="assistant" else "🌸"):
                     st.markdown(message["content"])
 
-        # 4. 追问输入框
-        if prompt := st.chat_input("针对审计结果，你想追问小耗子什么？"):
-            # 将用户输入加入历史
+        if prompt := st.chat_input("你想追问小耗子什么？"):
             st.session_state.chat_history.append({"role": "user", "content": prompt})
             with chat_container:
-                with st.chat_message("user", avatar="🌸"):
-                    st.markdown(prompt)
-
-            # 调用 AI 进行追问响应
+                with st.chat_message("user", avatar="🌸"): st.markdown(prompt)
             with st.chat_message("assistant", avatar="🐭"):
-                with st.spinner("思考中..."):
-                    client = OpenAI(api_key=api_key_input, base_url="https://api.deepseek.com")
-                    # 发送完整的对话上下文
-                    chat_response = client.chat.completions.create(
-                        model="deepseek-chat",
-                        messages=[{"role": "system", "content": "你是一个懂药理和代谢的理科伴侣小耗子，请继续针对小夏的问题进行专业且温柔的回答。"}] + 
-                                 st.session_state.chat_history
-                    )
-                    full_response = chat_response.choices[0].message.content
-                    st.markdown(full_response)
-            
-            # 将 AI 回复加入历史
+                client = OpenAI(api_key=api_key_input, base_url="https://api.deepseek.com")
+                chat_response = client.chat.completions.create(
+                    model="deepseek-chat",
+                    messages=[{"role": "system", "content": "你是理科伴侣小耗子。"}] + st.session_state.chat_history
+                )
+                full_response = chat_response.choices[0].message.content
+                st.markdown(full_response)
             st.session_state.chat_history.append({"role": "assistant", "content": full_response})
 
 with tab2:
@@ -241,15 +216,12 @@ with tab2:
             df_w['日期'] = pd.to_datetime(df_w['日期'])
             calc_df = df_w.sort_values('日期').drop_duplicates('日期', keep='last')
             pred_res, slope = get_prediction(calc_df)
-            
             c1, c2, c3 = st.columns(3)
             current_w = calc_df['体重'].iloc[-1]
             c1.metric("当前斜率", f"{slope:.3f} kg/d")
             c2.metric("距离目标", f"{round(current_w - 55.0, 1)} kg", delta=f"{slope:.3f}", delta_color="inverse")
             if isinstance(pred_res, datetime.date): c3.metric("达标预估", pred_res.strftime('%Y-%m-%d'))
-
             st.plotly_chart(px.line(calc_df, x="日期", y="体重", markers=True, color_discrete_sequence=['#ff6b81']), use_container_width=True)
-            
             with st.expander("🛠️ 历史数据管理"):
                 for _, row in calc_df.sort_values('日期', ascending=False).iterrows():
                     c_d, c_v, c_b = st.columns([2, 2, 1])
@@ -258,7 +230,6 @@ with tab2:
                     if c_b.button("🗑️ 删除", key=f"del_w_{row['id']}"):
                         supabase.table("weight_data").delete().eq("id", row['id']).execute()
                         st.rerun()
-        
         with st.form("weight_form_new"):
             ca, cb = st.columns(2)
             new_val = ca.number_input("体重 (kg)", value=60.0, step=0.1)
@@ -269,7 +240,6 @@ with tab2:
 
 with tab3:
     st.image("https://images.unsplash.com/photo-1540959733332-eab4deabeeaf?auto=format&fit=crop&w=1200&q=80", caption="2026, 重逢在东京", use_container_width=True)
-
 with tab4:
     st.markdown("## 📟 2026 跨年信箱")
     auth_code = st.text_input("输入 Access Code：", type="password", key="final_auth")
@@ -298,6 +268,7 @@ with tab4:
         </div>
         """
         st.markdown(letter_content, unsafe_allow_html=True)
+
 
 
 
