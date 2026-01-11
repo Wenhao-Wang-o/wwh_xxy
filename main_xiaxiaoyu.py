@@ -100,21 +100,22 @@ tab1, tab2, tab3, tab4 = st.tabs(["🌸 时光机", "📉 减脂美学", "🎒 �
 with tab1:
     col_l, col_r = st.columns([1.8, 1.2])
     with col_l:
+        st.subheader(f"📝 {current_user} 的深度记录")
+        
+        # --- 关键修改：将运动选择移出 form 以外以实现实时交互 ---
+        selected_sports = st.multiselect("🏃 运动项目", ["呼啦圈", "散步", "羽毛球", "健身房", "拉伸", "俯卧撑"])
+        is_pushup_mode = "俯卧撑" in selected_sports
+
         with st.form("daily_form_v_master", clear_on_submit=True):
-            st.subheader(f"📝 {current_user} 的深度记录")
             log_date = st.date_input("日期", datetime.date.today())
             diet_detail = st.text_area("🍱 今日饮食明细", placeholder="具体吃了什么？") if current_user == "小夏" else ""
             
-            # --- 运动逻辑修改点 ---
-            sports = st.multiselect("🏃 运动项目", ["呼啦圈", "散步", "羽毛球", "健身房", "拉伸", "俯卧撑"])
-            
-            # 如果选择了俯卧撑，切换为次数输入
-            if "俯卧撑" in sports:
-                sport_time = st.number_input("💪 俯卧撑总次数", min_value=0, max_value=1000, value=30, step=5)
+            # 动态切换输入组件
+            if is_pushup_mode:
+                sport_value = st.number_input("💪 俯卧撑总次数 (个)", min_value=0, max_value=1000, value=30, step=5)
             else:
-                sport_time = st.slider("⏱️ 运动时长 (分钟)", 0, 180, 30, step=5)
-            # ------------------
-
+                sport_value = st.slider("⏱️ 运动时长 (分钟)", 0, 180, 30, step=5)
+            
             diet_type = st.select_slider("🥗 饮食控制等级", options=["放纵🍕", "正常🍚", "清淡🥗", "严格🥦"], value="正常🍚")
             
             is_poop, water, part_time = "N/A", 0.0, 0.0
@@ -135,11 +136,20 @@ with tab1:
 
             if st.form_submit_button("同步到云端"):
                 supabase.table("daily_logs").insert({
-                    "user_name": current_user, "log_date": str(log_date), "sports": "|".join(sports),
-                    "sport_minutes": float(sport_time), "diet": diet_type, "diet_detail": diet_detail,
-                    "is_poop": is_poop, "water": water, "work": "|".join(work),
-                    "academic_hours": float(work_time), "part_time_hours": float(part_time),
-                    "detail": detail, "mood": mood, "focus_level": work_focus
+                    "user_name": current_user, 
+                    "log_date": str(log_date), 
+                    "sports": "|".join(selected_sports),
+                    "sport_minutes": float(sport_value), 
+                    "diet": diet_type, 
+                    "diet_detail": diet_detail,
+                    "is_poop": is_poop, 
+                    "water": water, 
+                    "work": "|".join(work),
+                    "academic_hours": float(work_time), 
+                    "part_time_hours": float(part_time),
+                    "detail": detail, 
+                    "mood": mood, 
+                    "focus_level": work_focus
                 }).execute()
                 st.rerun()
 
@@ -154,10 +164,9 @@ with tab1:
                             st.write(f"🍱 **饮食:** {log.get('diet_detail', '未记录')}")
                             st.write(f"💩 **排便:** {log['is_poop']} | 💧 **饮水:** {log['water']}L")
                         
-                        # --- 历史记录单位适配 ---
+                        # 历史记录单位适配
                         unit = "个" if "俯卧撑" in (log.get('sports') or "") else "min"
                         st.write(f"🏃 **运动:** {log['sports']} ({log.get('sport_minutes')}{unit})")
-                        # -----------------------
                         
                         st.write(f"📚 **学术:** {log.get('work')} ({log.get('academic_hours')}h)")
                         if log['detail']: st.markdown(f'<div class="diary-card">💌 {log["detail"]}</div>', unsafe_allow_html=True)
@@ -268,6 +277,7 @@ with tab4:
         </div>
         """
         st.markdown(letter_content, unsafe_allow_html=True)
+
 
 
 
