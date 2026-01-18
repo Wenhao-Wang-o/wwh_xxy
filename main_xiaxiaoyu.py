@@ -223,3 +223,55 @@ with tab1:
         for m in st.session_state.chat_history:
             with st.chat_message(m["role"], avatar="🐭" if m["role"]=="assistant" else "🌸"):
                 st.markdown(m["content"])
+    # --- Tab 2/3/4 部分保持原样 ---
+with tab2:
+    if current_user == "小夏":
+        st.markdown("### 📉 减脂美学：目标 55.0 kg")
+        if 'weight_data_list' in st.session_state and st.session_state.weight_data_list:
+            df_w = pd.DataFrame(st.session_state.weight_data_list)
+            df_w['日期'] = pd.to_datetime(df_w['日期'])
+            calc_df = df_w.sort_values('日期').drop_duplicates('日期', keep='last')
+            pred_res, slope = get_prediction(calc_df)
+            c1, c2, c3 = st.columns(3)
+            current_w = calc_df['体重'].iloc[-1]
+            c1.metric("当前斜率", f"{slope:.3f} kg/d")
+            c2.metric("距离目标", f"{round(current_w - 55.0, 1)} kg", delta=f"{slope:.3f}", delta_color="inverse")
+            if isinstance(pred_res, datetime.date): c3.metric("达标预估", pred_res.strftime('%Y-%m-%d'))
+            st.plotly_chart(px.line(calc_df, x="日期", y="体重", markers=True, color_discrete_sequence=['#ff6b81']), use_container_width=True)
+            with st.expander("🛠️ 历史数据管理"):
+                for _, row in calc_df.sort_values('日期', ascending=False).iterrows():
+                    c_d, c_v, c_b = st.columns([2, 2, 1])
+                    c_d.write(row['日期'].strftime('%Y-%m-%d'))
+                    c_v.write(f"{row['体重']} kg")
+                    if c_b.button("🗑️ 删除", key=f"del_w_{row['id']}"):
+                        supabase.table("weight_data").delete().eq("id", row['id']).execute()
+                        st.rerun()
+        with st.form("weight_form_new"):
+            ca, cb = st.columns(2)
+            new_val = ca.number_input("体重 (kg)", value=60.0, step=0.1)
+            new_dt = cb.date_input("测量日期", datetime.date.today())
+            if st.form_submit_button("同步"):
+                supabase.table("weight_data").insert({"user_name": "小夏", "weight_date": str(new_dt), "weight": new_val}).execute()
+                st.rerun()
+
+with tab3:
+    st.image("https://images.unsplash.com/photo-1540959733332-eab4deabeeaf?auto=format&fit=crop&w=1200&q=80", caption="2026, 重逢在东京", use_container_width=True)
+
+with tab4:
+    st.markdown("## 📟 2026 跨年信箱")
+    auth_code = st.text_input("输入 Access Code：", type="password", key="final_auth")
+    if auth_code == "wwhaxxy1314":
+        st.balloons()
+        letter_content = """
+        <div class="diary-card" style="line-height: 1.8; letter-spacing: 1px;">
+            <h3 style='text-align: left !important;'>🌸 宝儿：</h3>
+            <p><b>跨年快乐！</b></p>
+            <p>再过一天，就是我们的一周年纪念日了...</p>
+            <div style="text-align: right; margin-top: 20px;">
+                <b>—— [运维负责人: 小耗子 🐭]</b><br>
+                <i>2025/12/31</i>
+            </div>
+        </div>
+        """
+        st.markdown(letter_content, unsafe_allow_html=True)
+
