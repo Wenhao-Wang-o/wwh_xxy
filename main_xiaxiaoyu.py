@@ -28,7 +28,7 @@ def load_all_data(user):
         st.session_state.daily_logs = l_res.data
     except Exception as e: st.error(f"加载失败: {e}")
 
-# --- 2. 工具函数 (天气/预测保持原样) ---
+# --- 2. 工具函数 ---
 def get_weather(city_pinyin):
     api_key = "3f4ff1ded1a1a5fc5335073e8cf6f722"
     url = f"http://api.openweathermap.org/data/2.5/weather?q={city_pinyin}&appid={api_key}&units=metric&lang=zh_cn"
@@ -57,6 +57,8 @@ st.markdown("""
     .diary-card { background-color: #fff0f3; padding: 15px; border-radius: 12px; border-left: 5px solid #ff6b81; margin-top: 10px; color: #333; }
     .comment-card { background-color: #e3f2fd; padding: 12px; border-radius: 10px; border-left: 5px solid #2196f3; margin-top: 8px; color: #333; font-size: 0.95em; }
     .stButton>button { border-radius: 25px !important; background-color: #ff6b81 !important; color: white !important; font-weight: bold; }
+    /* 让表单外的组件看起来像在表单内 */
+    .section-box { border: 1px solid #ddd; padding: 20px; border-radius: 10px; background-color: white; margin-bottom: 10px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -88,67 +90,71 @@ with tab1:
     with col_l:
         st.subheader(f"📝 {current_user} 的深度记录")
         
-        # --- 统一表单开始 ---
-        with st.form("master_diary_v4", clear_on_submit=True):
-            log_date = st.date_input("日期", datetime.date.today())
-
-            # --- 板块一：运动（修复点：将选框放入表单内，但通过特殊逻辑处理） ---
-            st.markdown("### 🏃 运动详情")
-            selected_sports = st.multiselect("选择今日运动项", ["呼啦圈", "散步", "羽毛球", "健身房", "拉伸", "俯卧撑"])
-            
-            pushup_cnt, sport_mins = 0, 0
-            has_pushup = "俯卧撑" in selected_sports
-            has_others = any(s in selected_sports for s in ["呼啦圈", "散步", "羽毛球", "健身房", "拉伸"])
-            
+        # --- 修复逻辑：核心板块全部放在这里，不用 st.form 以保证即时交互 ---
+        
+        # 0. 日期选择
+        log_date = st.date_input("📅 记录日期", datetime.date.today())
+        
+        # 1. 运动板块 (即时刷新)
+        st.markdown("### 🏃 运动项与详情")
+        selected_sports = st.multiselect("选择今日运动项", ["呼啦圈", "散步", "羽毛球", "健身房", "拉伸", "俯卧撑"])
+        
+        pushup_cnt, sport_mins = 0, 0
+        has_pushup = "俯卧撑" in selected_sports
+        has_others = any(s in selected_sports for s in ["呼啦圈", "散步", "羽毛球", "健身房", "拉伸"])
+        
+        if selected_sports:
             col_s1, col_s2 = st.columns(2)
-            if has_others: sport_mins = col_s1.slider("基础时长 (min)", 0, 180, 30)
-            if has_pushup: pushup_cnt = col_s2.number_input("俯卧撑次数", 0, 1000, 30)
+            if has_others:
+                sport_mins = col_s1.slider("⏱️ 基础运动时长 (min)", 0, 180, 30)
+            if has_pushup:
+                pushup_cnt = col_s2.number_input("💪 俯卧撑总次数", 0, 1000, 30)
+        else:
+            st.info("💡 请先选择运动项目以录入详情")
+
+        st.divider()
+
+        # 2. 健康、工作与心情 (为了样式统一，这里也不用 form)
+        st.markdown("### 🥗 健康与饮食")
+        diet_detail = st.text_area("🍱 今日饮食明细") if current_user == "小夏" else ""
+        diet_lv = st.select_slider("🥗 饮食控制等级", options=["放纵🍕", "正常🍚", "清淡🥗", "严格🥦"], value="正常🍚")
+        
+        is_poop, water, part_time = "N/A", 0.0, 0.0
+        col_h1, col_h2 = st.columns(2)
+        if current_user == "小夏":
+            is_poop = col_h1.radio("💩 今日排便情况", ["未排便", "顺利排便 ✅"], horizontal=True)
+            water = col_h2.slider("💧 饮水量 (L)", 0.5, 4.0, 2.0, 0.5)
+        else:
+            part_time = col_h1.number_input("⏳ 今日兼职时长 (小时)", 0.0, 14.0, 0.0, step=0.5)
+
+        st.divider()
+        st.markdown("### 💻 工作、学术与心情")
+        work_items = st.multiselect("内容标签", ["看文献", "写论文", "找工作", "日常业务", "其他"])
+        work_h = st.slider("⏳ 专注时长 (h)", 0.0, 14.0, 4.0, step=0.5)
+        mood_val = st.select_slider("✨ 今日心情状态", options=["😢", "😟", "😐", "😊", "🥰"], value="😊")
+        user_note = st.text_area("💌 备注/碎碎念", placeholder="今天的小情绪...")
+
+        # 3. 提交按钮 (手动模拟表单提交)
+        if st.button("🚀 同步数据到云端", use_container_width=True):
+            # 整合前缀
+            final_detail = f"【💪 俯卧撑：{pushup_cnt}个】 {user_note}" if has_pushup else user_note
+            # 存储数值逻辑
+            final_sport = float(sport_mins) if has_others else float(pushup_cnt)
             
-            st.divider()
-
-            # --- 板块二：健康与饮食 ---
-            st.markdown("### 🥗 健康与饮食")
-            diet_detail = st.text_area("今日饮食明细") if current_user == "小夏" else ""
-            diet_lv = st.select_slider("饮食等级", options=["放纵🍕", "正常🍚", "清淡🥗", "严格🥦"], value="正常🍚")
-            
-            is_poop, water, part_time = "N/A", 0.0, 0.0
-            col_h1, col_h2 = st.columns(2)
-            if current_user == "小夏":
-                is_poop = col_h1.radio("💩 排便情况", ["未排便", "顺利排便 ✅"], horizontal=True)
-                water = col_h2.slider("💧 饮水量 (L)", 0.5, 4.0, 2.0, 0.5)
-            else:
-                part_time = col_h1.number_input("⏳ 兼职时长 (h)", 0.0, 14.0, 0.0, step=0.5)
-
-            st.divider()
-
-            # --- 板块三：工作与学术 ---
-            st.markdown("### 💻 工作与学术")
-            work_items = st.multiselect("工作内容", ["看文献", "写论文", "找工作", "日常业务", "其他"])
-            work_h = st.slider("专注时长 (h)", 0.0, 14.0, 4.0, step=0.5)
-            work_focus = st.select_slider("专注状态", options=["走神😴", "断续☕", "专注📚", "心流🔥"], value="专注📚")
-
-            st.divider()
-
-            # --- 板块四：心情与碎碎念 ---
-            st.markdown("### ✨ 心情与碎碎念")
-            mood_val = st.select_slider("心情评价", options=["😢", "😟", "😐", "😊", "🥰"], value="😊")
-            user_note = st.text_area("💌 备注")
-
-            if st.form_submit_button("🚀 同步到云端"):
-                # 逻辑处理
-                final_detail = f"【💪 俯卧撑：{pushup_cnt}个】 {user_note}" if has_pushup else user_note
-                final_sport = float(sport_mins) if has_others else float(pushup_cnt)
-                
+            try:
                 supabase.table("daily_logs").insert({
                     "user_name": current_user, "log_date": str(log_date), "sports": "|".join(selected_sports),
                     "sport_minutes": final_sport, "diet": diet_lv, "diet_detail": diet_detail,
                     "is_poop": is_poop, "water": water, "work": "|".join(work_items), 
                     "academic_hours": float(work_h), "part_time_hours": float(part_time), 
-                    "detail": final_detail, "mood": mood_val, "focus_level": work_focus
+                    "detail": final_detail, "mood": mood_val
                 }).execute()
+                st.success("✅ 数据已同步！")
                 st.rerun()
+            except Exception as e:
+                st.error(f"同步失败: {e}")
 
-        # --- 下方历史记录部分保持原样 ---
+        # --- 下方历史记录展示部分保持原样 ---
         st.divider()
         st.subheader("📜 历史存证与互动")
         if st.session_state.daily_logs:
@@ -161,27 +167,24 @@ with tab1:
                             st.write(f"🍱 **饮食:** {log.get('diet_detail') or '未记'} | 💩 **排便:** {log['is_poop']} | 💧 **饮水:** {log['water']}L")
                         else:
                             st.write(f"💰 **兼职:** {log['part_time_hours']}h")
-                        
                         st.write(f"🏃 **运动:** {log['sports']} ({log['sport_minutes']}) | 💻 **学术:** {log.get('academic_hours')}h")
                         st.markdown(f'<div class="diary-card">💌 碎碎念：<br>{log["detail"]}</div>', unsafe_allow_html=True)
-                        
-                        reply = log.get('comment_from_haozhi')
-                        if reply:
-                            st.markdown(f'<div class="comment-card">🐭 小耗子回应：<br>{reply}</div>', unsafe_allow_html=True)
-                    
+                        haozhi_reply = log.get('comment_from_haozhi')
+                        if haozhi_reply:
+                            st.markdown(f'<div class="comment-card">🐭 小耗子回应：<br>{haozhi_reply}</div>', unsafe_allow_html=True)
                     with c2:
                         if current_user == "小耗子" and log['user_name'] == "小夏":
-                            ans_box = st.text_area("快速回复", key=f"ans_{log['id']}")
-                            if st.button("💬 提交回复", key=f"b_{log['id']}"):
-                                supabase.table("daily_logs").update({"comment_from_haozhi": ans_box}).eq("id", log['id']).execute()
+                            ans = st.text_area("回复", key=f"ans_{log['id']}")
+                            if st.button("提交", key=f"b_{log['id']}"):
+                                supabase.table("daily_logs").update({"comment_from_haozhi": ans}).eq("id", log['id']).execute()
                                 st.rerun()
                         if current_user == log['user_name']:
-                            if st.button("🗑️ 删除", key=f"d_{log['id']}"):
+                            if st.button("🗑️", key=f"d_{log['id']}"):
                                 supabase.table("daily_logs").delete().eq("id", log['id']).execute()
                                 st.rerun()
 
     with col_r:
-        # AI 审计部分逻辑保持原样
+        # AI 审计逻辑保持原样
         st.markdown("### 🤖 智能深度审计")
         if st.button("🚀 生成小夏专项复盘报告", use_container_width=True):
             if api_key_input and st.session_state.daily_logs:
@@ -190,11 +193,10 @@ with tab1:
                 client = OpenAI(api_key=api_key_input, base_url="https://api.deepseek.com")
                 res = client.chat.completions.create(
                     model="deepseek-chat", 
-                    messages=[{"role": "system", "content": "你是个温柔理性的理科男伴侣。"},{"role": "user", "content": f"分析数据并回应碎碎念：\n{history_str}"}]
+                    messages=[{"role": "system", "content": "你是个温柔理性的理科男伴侣。"},{"role": "user", "content": f"分析数据：\n{history_str}"}]
                 )
                 st.session_state.chat_history = [{"role": "assistant", "content": res.choices[0].message.content}]
                 st.rerun()
-        
         if "chat_history" in st.session_state:
             for m in st.session_state.chat_history:
                 with st.chat_message(m["role"], avatar="🐭" if m["role"]=="assistant" else "🌸"):
@@ -250,6 +252,7 @@ with tab4:
         </div>
         """
         st.markdown(letter_content, unsafe_allow_html=True)
+
 
 
 
