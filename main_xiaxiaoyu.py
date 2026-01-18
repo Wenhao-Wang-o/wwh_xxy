@@ -59,14 +59,14 @@ def calculate_calories(sports_list, sport_mins, pushups, floors, weight):
     if "爬楼" in sports_list: total_kcal += floors * 3.0
     return round(total_kcal, 1)
 
-# --- 3. UI 样式 (手机夜间模式强制适配) ---
+# --- 3. UI 样式 ---
 st.set_page_config(page_title="2026东京之约", layout="wide", page_icon="🗼")
 st.markdown("""
     <style>
     .stApp { background: linear-gradient(135deg, #fff5f7 0%, #f0f4ff 100%); }
     h1, h2, h3 { color: #ff6b81 !important; text-align: center !important; }
     .diary-card { background-color: #ffffff; padding: 15px; border-radius: 12px; border-left: 5px solid #ff6b81; margin-top: 10px; color: #333; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-    .reply-card { background-color: #f0f7ff; padding: 12px; border-radius: 10px; border-left: 5px solid #4a90e2; margin-top: 8px; color: #333; font-size: 0.95em; }
+    .reply-card { background-color: #f0f7ff; padding: 12px; border-radius: 10px; border-left: 5px solid #4a90e2; margin-top: 8px; color: #444; font-size: 0.95em; }
     .kcal-box { background: #fff9db; border: 1px solid #fcc419; padding: 10px; border-radius: 8px; color: #e67700; font-weight: bold; text-align: center; }
 
     @media (prefers-color-scheme: dark) {
@@ -102,12 +102,9 @@ with tab1:
     with col_l:
         st.subheader("📝 深度记录")
         selected_sports = st.multiselect("🏃 今日运动项", ["呼啦圈", "散步", "羽毛球", "健身房", "拉伸", "俯卧撑", "爬楼"])
-        
-        # 实时获取最新体重用于计算
         active_w = 60.0
         if 'weight_data_list' in st.session_state and st.session_state.weight_data_list:
             active_w = st.session_state.weight_data_list[-1]['体重']
-
         log_date = st.date_input("📅 记录日期", datetime.date.today())
         
         pushup_cnt, floor_cnt, sport_mins = 0, 0, 0
@@ -133,25 +130,24 @@ with tab1:
         else:
             part_time = col_h1.number_input("⏳ 今日兼职时长 (h)", 0.0, 14.0, 0.0)
 
-        work_h = st.slider("⏳ 专注/学术时长 (h)", 0.0, 14.0, 4.0, step=0.5)
+        work_h = st.slider("⏳ 专注时长 (h)", 0.0, 14.0, 4.0, step=0.5)
         mood_val = st.select_slider("✨ 今日心情", options=["😢", "😟", "😐", "😊", "🥰"], value="😊")
-        user_note = st.text_area("💌 备注/碎碎念", placeholder="今天有什么想对TA说的？")
+        user_note = st.text_area("💌 备注/碎碎念", placeholder="今天的小情绪...")
 
         if st.button("🚀 同步数据到云端", use_container_width=True):
             prefix = ""
             if pushup_cnt > 0: prefix += f"【💪 俯卧撑：{pushup_cnt}个】"
             if floor_cnt > 0: prefix += f"【🪜 爬楼：{floor_cnt}层】"
             if estimated_kcal > 0: prefix += f"【🔥 消耗：{estimated_kcal}kcal】"
-            final_detail = f"{prefix} {user_note}"
-            final_sport_val = float(sport_mins) if has_others else (float(pushup_cnt) if pushup_cnt>0 else float(floor_cnt))
+            f_detail = f"{prefix} {user_note}"
+            f_sport = float(sport_mins) if has_others else (float(pushup_cnt) if pushup_cnt>0 else float(floor_cnt))
             
             supabase.table("daily_logs").insert({
                 "user_name": current_user, "log_date": str(log_date), "sports": "|".join(selected_sports),
-                "sport_minutes": final_sport_val, "diet": diet_lv, "diet_detail": diet_detail,
+                "sport_minutes": f_sport, "diet": diet_lv, "diet_detail": diet_detail,
                 "is_poop": is_poop, "water": water, "academic_hours": float(work_h), 
-                "part_time_hours": float(part_time), "detail": final_detail, "mood": mood_val
+                "part_time_hours": float(part_time), "detail": f_detail, "mood": mood_val
             }).execute()
-            st.success("✅ 同步成功！")
             st.rerun()
 
         st.divider()
@@ -171,78 +167,64 @@ with tab1:
                             reply_label = "🐭 小耗子回应" if log['user_name'] == "小夏" else "🌸 小夏回应"
                             st.markdown(f'<div class="reply-card"><b>{reply_label}：</b><br>{reply}</div>', unsafe_allow_html=True)
                     with c2:
+                        # 回复逻辑修复：只要不是记录者本人，就显示回复框
                         if current_user != log['user_name']:
-                            ans = st.text_area("回复TA", key=f"ans_{log['id']}")
-                            if st.button("发送", key=f"b_{log['id']}"):
-                                supabase.table("daily_logs").update({"comment_from_haozhi": ans}).eq("id", log['id']).execute()
-                                st.rerun()
+                            ans_input = st.text_area("回复TA", key=f"ans_{log['id']}", placeholder="写点鼓励吧...")
+                            if st.button("发送", key=f"btn_reply_{log['id']}"):
+                                if ans_input:
+                                    supabase.table("daily_logs").update({"comment_from_haozhi": ans_input}).eq("id", log['id']).execute()
+                                    st.rerun()
                         if current_user == log['user_name']:
-                            if st.button("🗑️", key=f"d_{log['id']}"):
+                            if st.button("🗑️", key=f"del_{log['id']}"):
                                 supabase.table("daily_logs").delete().eq("id", log['id']).execute()
                                 st.rerun()
 
     with col_r:
-        st.markdown("### 🤖 智能深度审计")
-        if st.button("🚀 生成小夏专项分析", use_container_width=True):
+        st.markdown("### 🤖 智能审计")
+        if st.button("🚀 生成小夏复盘报告", use_container_width=True):
             if api_key_input and st.session_state.daily_logs:
                 xia_logs = [l for l in st.session_state.daily_logs if l['user_name'] == "小夏"][:10]
-                # 获取体重斜率逻辑
                 slope_val = 0
                 if 'weight_data_list' in st.session_state and len(st.session_state.weight_data_list) >= 2:
                     df_w = pd.DataFrame(st.session_state.weight_data_list)
                     _, slope_val = get_prediction(df_w)
-                
                 history_str = "\n".join([f"- {l['log_date']}: 排便[{l['is_poop']}], 饮水[{l['water']}L], 备注[{l['detail']}]" for l in xia_logs])
-                
                 client = OpenAI(api_key=api_key_input, base_url="https://api.deepseek.com")
-                prompt = f"""你是理科伴侣小耗子。小夏正在服用氯氮平，近期体重斜率为 {slope_val:.3f} kg/d。
-                历史数据如下：
-                {history_str}
-                请结合【排便频率】、【饮水量】和【备注里的情绪】给出一段专业且温柔的回复。"""
-                
+                prompt = f"你是理科伴侣小耗子。分析近期体重斜率 {slope_val:.3f} kg/d 及数据：\n{history_str}\n结合肠道健康和卡路里给出建议。"
                 res = client.chat.completions.create(model="deepseek-chat", messages=[{"role": "user", "content": prompt}])
                 st.session_state.chat_history = [{"role": "assistant", "content": res.choices[0].message.content}]
                 st.rerun()
         if "chat_history" in st.session_state:
             for m in st.session_state.chat_history:
-                with st.chat_message(m["role"], avatar="🐭" if m["role"]=="assistant" else "🌸"):
-                    st.markdown(m["content"])
+                with st.chat_message(m["role"], avatar="🐭" if m["role"]=="assistant" else "🌸"): st.markdown(m["content"])
 
 with tab2:
     if current_user == "小夏":
-        st.markdown("### 📉 减脂美学：目标 55.0 kg")
+        st.markdown("### 📉 减脂美学")
         if 'weight_data_list' in st.session_state and len(st.session_state.weight_data_list) > 0:
             df_w = pd.DataFrame(st.session_state.weight_data_list)
             df_w['日期'] = pd.to_datetime(df_w['日期'])
             calc_df = df_w.sort_values('日期').drop_duplicates('日期', keep='last')
-            
-            # 安全逻辑：只有超过2个点才计算预测
-            pred_date, weight_slope = get_prediction(calc_df)
-            
+            pred_dt, w_slope = get_prediction(calc_df)
             c1, c2, c3 = st.columns(3)
-            curr_w = calc_df['体重'].iloc[-1]
-            c1.metric("当前斜率", f"{weight_slope:.3f} kg/d")
-            c2.metric("距离目标", f"{round(curr_w - 55.0, 1)} kg", delta=f"{weight_slope:.3f}", delta_color="inverse")
-            if pred_date: c3.metric("达标预估", pred_date.strftime('%Y-%m-%d'))
-            
+            cw = calc_df['体重'].iloc[-1]
+            c1.metric("当前斜率", f"{w_slope:.3f} kg/d")
+            c2.metric("距离目标", f"{round(cw - 55.0, 1)} kg", delta=f"{w_slope:.3f}", delta_color="inverse")
+            if pred_dt: c3.metric("达标预估", pred_dt.strftime('%Y-%m-%d'))
             st.plotly_chart(px.line(calc_df, x="日期", y="体重", markers=True, color_discrete_sequence=['#ff6b81']), use_container_width=True)
-        else:
-            st.info("尚未录入体重数据，请在下方开始同步吧！")
-
-        with st.form("weight_form_fix"):
+        else: st.info("尚未录入体重数据。")
+        with st.form("w_form"):
             ca, cb = st.columns(2)
-            new_val = ca.number_input("体重 (kg)", value=60.0, step=0.1)
-            new_dt = cb.date_input("测量日期", datetime.date.today())
+            nv, nd = ca.number_input("体重 (kg)", value=60.0, step=0.1), cb.date_input("日期", datetime.date.today())
             if st.form_submit_button("同步体重"):
-                supabase.table("weight_data").insert({"user_name": "小夏", "weight_date": str(new_dt), "weight": new_val}).execute()
+                supabase.table("weight_data").insert({"user_name": "小夏", "weight_date": str(nd), "weight": nv}).execute()
                 st.rerun()
-    else:
-        st.info("📉 这是小夏的减脂管理区，小耗子请切换回小夏身份查看。")
+    else: st.info("📉 这是小夏的专区。")
 
 with tab3: st.image("https://images.unsplash.com/photo-1540959733332-eab4deabeeaf?auto=format&fit=crop&w=1200&q=80", use_container_width=True)
 with tab4:
     st.markdown("## 📟 2026 跨年信箱")
-    auth_code = st.text_input("Access Code：", type="password", key="final_auth")
-    if auth_code == "wwhaxxy1314":
+    auth = st.text_input("Access Code：", type="password", key="final_auth")
+    if auth == "wwhaxxy1314":
         st.balloons()
-        st.markdown('<div class="diary-card">🌸 宝儿：跨年快乐！新的一年我们一起努力！</div>', unsafe_allow_html=True)
+        st.markdown('<div class="diary-card">🌸 宝儿：跨年快乐！新的一年，我们一起努力！</div>', unsafe_allow_html=True)
