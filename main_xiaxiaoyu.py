@@ -22,18 +22,14 @@ supabase = init_supabase()
 # --- 1. 数据库函数 ---
 def load_all_data(user):
     try:
-        # 这里的 user 逻辑：加载数据时我们通常需要看双方的记录
-        # 但为了保持你原来的逻辑，我们加载当前 radio 选择的用户数据
         w_res = supabase.table("weight_data").select("*").eq("user_name", user).order("weight_date").execute()
         st.session_state.weight_data_list = [{"日期": r['weight_date'], "体重": r['weight'], "id": r['id']} for r in w_res.data]
-        
-        # 加载小夏的日志供小耗子评论，或者加载当前用户的日志
-        target_user = "小夏" if current_user == "小耗子" else "小夏" 
-        l_res = supabase.table("daily_logs").select("*").eq("user_name", "小夏").order("log_date", desc=True).execute()
+        # 始终加载小夏和小耗子的混合日志，以便互相查看评论
+        l_res = supabase.table("daily_logs").select("*").order("log_date", desc=True).execute()
         st.session_state.daily_logs = l_res.data
     except Exception as e: st.error(f"加载失败: {e}")
 
-# --- 2. 工具函数 (天气/预测保持不变) ---
+# --- 2. 工具函数 ---
 def get_weather(city_pinyin):
     api_key = "3f4ff1ded1a1a5fc5335073e8cf6f722"
     url = f"http://api.openweathermap.org/data/2.5/weather?q={city_pinyin}&appid={api_key}&units=metric&lang=zh_cn"
@@ -60,8 +56,13 @@ st.markdown("""
     .stApp { background: linear-gradient(135deg, #fff5f7 0%, #f0f4ff 100%); }
     h1, h2, h3 { color: #ff6b81 !important; text-align: center !important; }
     .diary-card { background-color: #fff0f3; padding: 12px; border-radius: 12px; border-left: 4px solid #ff6b81; margin-top: 10px; color: #333; }
-    .comment-card { background-color: #f0f4ff; padding: 10px; border-radius: 10px; border-left: 4px solid #4a90e2; margin-top: 5px; font-size: 0.9em; color: #444; }
-    .stButton>button { border-radius: 25px !important; }
+    .comment-card { background-color: #e3f2fd; padding: 10px; border-radius: 10px; border-left: 4px solid #2196f3; margin-top: 5px; font-size: 0.9em; color: #333; }
+    .stButton>button { border-radius: 25px !important; background-color: #ff6b81 !important; color: white !important; }
+    @media (prefers-color-scheme: dark) {
+        .stApp { background: linear-gradient(135deg, #1e1e1e 0%, #121212 100%) !important; }
+        .diary-card { background-color: #2d2d2d !important; color: #efefef !important; }
+        .comment-card { background-color: #1a237e !important; color: #e0e0e0 !important; }
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -91,77 +92,158 @@ tab1, tab2, tab3, tab4 = st.tabs(["🌸 时光机", "📉 减脂美学", "🎒 �
 with tab1:
     col_l, col_r = st.columns([1.8, 1.2])
     with col_l:
-        # --- 小夏的输入表单 (仅小夏可见) ---
-        if current_user == "小夏":
-            st.subheader(f"📝 {current_user} 的深度记录")
-            all_options = ["呼啦圈", "散步", "羽毛球", "健身房", "拉伸", "俯卧撑"]
-            selected_sports = st.multiselect("🏃 运动项目", all_options)
+        # --- 统一录入表单：保留所有功能 ---
+        st.subheader(f"📝 {current_user} 的深度记录")
+        all_options = ["呼啦圈", "散步", "羽毛球", "健身房", "拉伸", "俯卧撑"]
+        selected_sports = st.multiselect("🏃 运动项目", all_options)
+        
+        with st.form("daily_form_master", clear_on_submit=True):
+            log_date = st.date_input("日期", datetime.date.today())
+            diet_detail = st.text_area("🍱 今日饮食明细") if current_user == "小夏" else ""
             
-            with st.form("daily_form", clear_on_submit=True):
-                log_date = st.date_input("日期", datetime.date.today())
-                diet_detail = st.text_area("🍱 今日饮食明细")
-                # 运动逻辑拆分
-                pushup_count = 0
-                other_sport_time = 0
-                has_other_sports = any(s in selected_sports for s in ["呼啦圈", "散步", "羽毛球", "健身房", "拉伸"])
-                has_pushup = "俯卧撑" in selected_sports
-                if has_other_sports: other_sport_time = st.slider("⏱️ 基础运动时长", 0, 180, 30, step=5)
-                if has_pushup: pushup_count = st.number_input("💪 俯卧撑次数", 0, 1000, 30)
-                
-                detail = st.text_area("💌 碎碎念/备注", placeholder="今天有什么想对小耗子说的？")
-                mood = st.select_slider("✨ 心情", options=["😢", "😟", "😐", "😊", "🥰"], value="😊")
+            # 运动逻辑
+            pushup_count = 0
+            other_sport_time = 0
+            has_other_sports = any(s in selected_sports for s in ["呼啦圈", "散步", "羽毛球", "健身房", "拉伸"])
+            has_pushup = "俯卧撑" in selected_sports
+            if has_other_sports: other_sport_time = st.slider("⏱️ 基础运动时长", 0, 180, 30, step=5)
+            if has_pushup: pushup_count = st.number_input("💪 俯卧撑次数", 0, 1000, 30)
+            
+            diet_type = st.select_slider("🥗 饮食控制等级", options=["放纵🍕", "正常🍚", "清淡🥗", "严格🥦"], value="正常🍚")
+            
+            # 身份差异功能
+            is_poop, water, part_time = "N/A", 0.0, 0.0
+            if current_user == "小夏":
+                st.write("---")
+                ch1, ch2 = st.columns(2)
+                is_poop = ch1.radio("💩 今日排便情况", ["未排便", "顺利排便 ✅"], horizontal=True)
+                water = ch2.slider("💧 饮水量 (L)", 0.5, 4.0, 2.0, 0.5)
+            else:
+                st.write("---")
+                part_time = st.number_input("⏳ 今日兼职时长 (小时)", 0.0, 14.0, 0.0, step=0.5)
+            
+            work = st.multiselect("💻 学术与工作内容", ["看文献", "写论文", "找工作", "其他"])
+            work_time = st.slider("⏳ 专注时长 (小时)", 0.0, 14.0, 4.0, step=0.5)
+            work_focus = st.select_slider("🎯 专注状态", options=["走神😴", "断续☕", "专注📚", "心流🔥"], value="专注📚")
+            detail = st.text_area("💌 碎碎念/备注")
+            mood = st.select_slider("✨ 心情", options=["😢", "😟", "😐", "😊", "🥰"], value="😊")
 
-                if st.form_submit_button("同步到云端"):
-                    final_detail = f"【俯卧撑：{pushup_count}个】 " + detail if (has_pushup and has_other_sports) else detail
-                    final_sport_val = float(pushup_count) if (has_pushup and not has_other_sports) else float(other_sport_time)
-                    
-                    supabase.table("daily_logs").insert({
-                        "user_name": "小夏", "log_date": str(log_date), 
-                        "sports": "|".join(selected_sports), "sport_minutes": final_sport_val,
-                        "diet_detail": diet_detail, "detail": final_detail, "mood": mood
-                    }).execute()
-                    st.rerun()
-        else:
-            st.info("💡 小耗子模式：请在下方查看小夏的记录并进行评论。")
+            if st.form_submit_button("同步到云端"):
+                final_detail = f"【俯卧撑：{pushup_count}个】 " + detail if (has_pushup and has_other_sports) else detail
+                final_sport_val = float(pushup_count) if (has_pushup and not has_other_sports) else float(other_sport_time)
+                
+                supabase.table("daily_logs").insert({
+                    "user_name": current_user, "log_date": str(log_date), 
+                    "sports": "|".join(selected_sports), "sport_minutes": final_sport_val,
+                    "diet": diet_type, "diet_detail": diet_detail, "is_poop": is_poop, "water": water,
+                    "work": "|".join(work), "academic_hours": float(work_time), 
+                    "part_time_hours": float(part_time), "detail": final_detail, "mood": mood, "focus_level": work_focus
+                }).execute()
+                st.rerun()
 
         st.divider()
-        st.subheader("📜 历史存证与互动")
+        st.subheader("📜 历史存证与回复")
         
         if st.session_state.daily_logs:
-            for log in st.session_state.daily_logs[:10]:
-                with st.expander(f"📅 {log['log_date']} - 心情: {log['mood']}"):
+            # 只展示小夏的记录供评论，或者展示全部。这里建议展示全部。
+            for log in st.session_state.daily_logs[:15]:
+                # 根据日志拥有者显示不同的标签
+                owner_label = "🌸" if log['user_name'] == "小夏" else "🐭"
+                with st.expander(f"{owner_label} {log['log_date']} - 心情: {log['mood']}"):
                     c_info, c_action = st.columns([3, 1])
-                    
                     with c_info:
+                        if log['user_name'] == "小夏":
+                            st.write(f"🍱 **饮食:** {log.get('diet_detail') or '未记录'}")
                         st.write(f"🏃 **运动:** {log['sports']} ({log['sport_minutes']})")
-                        st.markdown(f'<div class="diary-card">🌸 小夏的碎碎念：<br>{log["detail"]}</div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="diary-card">💌 碎碎念：{log["detail"]}</div>', unsafe_allow_html=True)
                         
-                        # 显示小耗子的回复 (如果存在)
-                        # 注意：这里假设数据库中有字段 'comment_from_haozhi'
-                        haozhi_reply = log.get('comment_from_haozhi')
-                        if haozhi_reply:
-                            st.markdown(f'<div class="comment-card">🐭 小耗子的评论：<br>{haozhi_reply}</div>', unsafe_allow_html=True)
+                        # 显示评论（来自 comment_from_haozhi 字段）
+                        reply = log.get('comment_from_haozhi')
+                        if reply:
+                            st.markdown(f'<div class="comment-card">🐭 小耗子的回应：<br>{reply}</div>', unsafe_allow_html=True)
                     
                     with c_action:
-                        # 小耗子的专属按键
-                        if current_user == "小耗子":
-                            new_reply = st.text_area("回复碎碎念", key=f"re_{log['id']}", placeholder="写下你的鼓励...")
-                            if st.button("💬 提交评论", key=f"btn_{log['id']}"):
-                                if new_reply:
-                                    supabase.table("daily_logs").update({"comment_from_haozhi": new_reply}).eq("id", log['id']).execute()
-                                    st.success("评论已同步！")
+                        # 核心功能：如果当前是小耗子，且这是小夏的记录，显示评论框
+                        if current_user == "小耗子" and log['user_name'] == "小夏":
+                            comment_input = st.text_area("写下回复", key=f"cmt_{log['id']}")
+                            if st.button("💬 提交回复", key=f"btn_{log['id']}"):
+                                if comment_input:
+                                    supabase.table("daily_logs").update({"comment_from_haozhi": comment_input}).eq("id", log['id']).execute()
+                                    st.success("回复成功！")
                                     st.rerun()
                         
-                        # 只有小夏可以删除自己的
-                        if current_user == "小夏":
-                            if st.button("🗑️ 删除", key=f"del_{log['id']}"):
+                        # 删除权限：只能删除自己的
+                        if current_user == log['user_name']:
+                            if st.button("🗑️ 删除记录", key=f"del_{log['id']}"):
                                 supabase.table("daily_logs").delete().eq("id", log['id']).execute()
                                 st.rerun()
 
     with col_r:
-        # 机器人复盘保持不变...
         st.markdown("### 🤖 智能审计")
-        # (此处代码同前，省略以保持简洁)
-        pass
+        # (AI 部分代码保持不变)
+        if "chat_history" not in st.session_state: st.session_state.chat_history = []
+        if st.button("🚀 生成复盘报告", use_container_width=True):
+            if api_key_input and st.session_state.daily_logs:
+                with st.spinner("复盘中..."):
+                    history_logs = [l for l in st.session_state.daily_logs if l['user_name']=="小夏"][:10]
+                    history_str = "\n".join([f"- {l['log_date']}: {l['detail']}" for l in history_logs])
+                    client = OpenAI(api_key=api_key_input, base_url="https://api.deepseek.com")
+                    res = client.chat.completions.create(model="deepseek-chat", messages=[{"role":"system","content":"你是个理科男伴侣。"},{"role":"user","content":f"分析记录：{history_str}"}])
+                    st.session_state.chat_history = [{"role":"assistant","content":res.choices[0].message.content}]
+                    st.rerun()
+        # 对话展示区...
+        for m in st.session_state.chat_history:
+            with st.chat_message(m["role"], avatar="🐭" if m["role"]=="assistant" else "🌸"): st.markdown(m["content"])
 
-# --- 后面 Tab 2/3/4 保持不变 ---
+# --- Tab 2/3/4 保持不变 ---
+# --- Tab 2/3/4 部分保持原样 ---
+with tab2:
+    if current_user == "小夏":
+        st.markdown("### 📉 减脂美学：目标 55.0 kg")
+        if 'weight_data_list' in st.session_state and st.session_state.weight_data_list:
+            df_w = pd.DataFrame(st.session_state.weight_data_list)
+            df_w['日期'] = pd.to_datetime(df_w['日期'])
+            calc_df = df_w.sort_values('日期').drop_duplicates('日期', keep='last')
+            pred_res, slope = get_prediction(calc_df)
+            c1, c2, c3 = st.columns(3)
+            current_w = calc_df['体重'].iloc[-1]
+            c1.metric("当前斜率", f"{slope:.3f} kg/d")
+            c2.metric("距离目标", f"{round(current_w - 55.0, 1)} kg", delta=f"{slope:.3f}", delta_color="inverse")
+            if isinstance(pred_res, datetime.date): c3.metric("达标预估", pred_res.strftime('%Y-%m-%d'))
+            st.plotly_chart(px.line(calc_df, x="日期", y="体重", markers=True, color_discrete_sequence=['#ff6b81']), use_container_width=True)
+            with st.expander("🛠️ 历史数据管理"):
+                for _, row in calc_df.sort_values('日期', ascending=False).iterrows():
+                    c_d, c_v, c_b = st.columns([2, 2, 1])
+                    c_d.write(row['日期'].strftime('%Y-%m-%d'))
+                    c_v.write(f"{row['体重']} kg")
+                    if c_b.button("🗑️ 删除", key=f"del_w_{row['id']}"):
+                        supabase.table("weight_data").delete().eq("id", row['id']).execute()
+                        st.rerun()
+        with st.form("weight_form_new"):
+            ca, cb = st.columns(2)
+            new_val = ca.number_input("体重 (kg)", value=60.0, step=0.1)
+            new_dt = cb.date_input("测量日期", datetime.date.today())
+            if st.form_submit_button("同步"):
+                supabase.table("weight_data").insert({"user_name": "小夏", "weight_date": str(new_dt), "weight": new_val}).execute()
+                st.rerun()
+
+with tab3:
+    st.image("https://images.unsplash.com/photo-1540959733332-eab4deabeeaf?auto=format&fit=crop&w=1200&q=80", caption="2026, 重逢在东京", use_container_width=True)
+
+with tab4:
+    st.markdown("## 📟 2026 跨年信箱")
+    auth_code = st.text_input("输入 Access Code：", type="password", key="final_auth")
+    if auth_code == "wwhaxxy1314":
+        st.balloons()
+        letter_content = """
+        <div class="diary-card" style="line-height: 1.8; letter-spacing: 1px;">
+            <h3 style='text-align: left !important;'>🌸 宝儿：</h3>
+            <p><b>跨年快乐！</b></p>
+            <p>再过一天，就是我们的一周年纪念日了...</p>
+            <div style="text-align: right; margin-top: 20px;">
+                <b>—— [运维负责人: 小耗子 🐭]</b><br>
+                <i>2025/12/31</i>
+            </div>
+        </div>
+        """
+        st.markdown(letter_content, unsafe_allow_html=True)
