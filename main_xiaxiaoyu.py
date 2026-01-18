@@ -60,7 +60,7 @@ st.markdown("""
     
     @media (prefers-color-scheme: dark) {
         .stApp { background: linear-gradient(135deg, #1e1e1e 0%, #121212 100%) !important; }
-        .diary-card { background-color: #2d2d2d !important; color: #efefef !important; }
+        .diary-card { background-color: #2d2d2d !important; color: #efefef !important; border-left: 4px solid #ff6b81 !important; }
         h1, h2, h3 { color: #ff8fa3 !important; }
         [data-testid="stSidebar"] { background-color: #1a1a1a !important; }
         .stMarkdown, p, span { color: #dddddd !important; }
@@ -99,8 +99,6 @@ with tab1:
     col_l, col_r = st.columns([1.8, 1.2])
     with col_l:
         st.subheader(f"📝 {current_user} 的深度记录")
-        
-        # 移出 form 实现实时响应
         all_options = ["呼啦圈", "散步", "羽毛球", "健身房", "拉伸", "俯卧撑"]
         selected_sports = st.multiselect("🏃 运动项目", all_options)
         
@@ -108,24 +106,18 @@ with tab1:
             log_date = st.date_input("日期", datetime.date.today())
             diet_detail = st.text_area("🍱 今日饮食明细", placeholder="具体吃了什么？") if current_user == "小夏" else ""
             
-            # --- 核心改进：逻辑拆分 ---
             pushup_count = 0
             other_sport_time = 0
-            
-            # 判断是否有非俯卧撑的运动
             has_other_sports = any(s in selected_sports for s in ["呼啦圈", "散步", "羽毛球", "健身房", "拉伸"])
             has_pushup = "俯卧撑" in selected_sports
 
             if has_other_sports:
                 other_sport_time = st.slider("⏱️ 基础运动时长 (分钟)", 0, 180, 30, step=5)
-            
             if has_pushup:
                 pushup_count = st.number_input("💪 俯卧撑总次数 (个)", min_value=0, max_value=1000, value=30, step=5)
             
-            # 如果什么都没选
             if not selected_sports:
                 st.info("请先在上方选择运动项目")
-            # --------------------------
 
             diet_type = st.select_slider("🥗 饮食控制等级", options=["放纵🍕", "正常🍚", "清淡🥗", "严格🥦"], value="正常🍚")
             
@@ -146,8 +138,6 @@ with tab1:
             mood = st.select_slider("✨ 心情", options=["😢", "😟", "😐", "😊", "🥰"], value="😊")
 
             if st.form_submit_button("同步到云端"):
-                # 为了兼容原有数据库字段，我们将数据拼接在备注或单独处理
-                # 这里我们把 pushup 数量暂时存在 sport_minutes，如果是混合模式，则存时长，把次数写进 detail
                 final_detail = detail
                 if has_pushup and has_other_sports:
                     final_detail = f"【俯卧撑：{pushup_count}个】 " + detail
@@ -185,8 +175,6 @@ with tab1:
                         if current_user == "小夏":
                             st.write(f"🍱 **饮食:** {log.get('diet_detail', '未记录')}")
                             st.write(f"💩 **排便:** {log['is_poop']} | 💧 **饮水:** {log['water']}L")
-                        
-                        # 显示逻辑：判断是否是纯俯卧撑
                         log_sports = log.get('sports') or ""
                         if "俯卧撑" in log_sports and any(s in log_sports for s in ["呼啦圈", "散步", "羽毛球", "健身房", "拉伸"]):
                             st.write(f"🏃 **运动:** {log_sports} ({log.get('sport_minutes')}min + 俯卧撑已计入备注)")
@@ -194,7 +182,6 @@ with tab1:
                             st.write(f"🏃 **运动:** {log_sports} ({log.get('sport_minutes')}个)")
                         else:
                             st.write(f"🏃 **运动:** {log_sports} ({log.get('sport_minutes')}min)")
-                        
                         st.write(f"📚 **学术:** {log.get('work')} ({log.get('academic_hours')}h)")
                         if log['detail']: st.markdown(f'<div class="diary-card">💌 {log["detail"]}</div>', unsafe_allow_html=True)
                     with c_del:
@@ -203,33 +190,59 @@ with tab1:
                             st.rerun()
 
     with col_r:
-        # 机器人部分保持原样...
-        st.markdown("### 🤖 智能审计与追问")
+        st.markdown("### 🤖 智能审计与回应")
         if "chat_history" not in st.session_state:
             st.session_state.chat_history = []
-        if st.button("🚀 生成深度分析复盘", use_container_width=True):
+        
+        if st.button("🚀 生成深度复盘报告", use_container_width=True):
             if api_key_input and st.session_state.daily_logs:
-                with st.spinner("小耗子正在复盘..."):
+                with st.spinner("小耗子正在阅读你的碎碎念并复盘数据..."):
                     history_logs = st.session_state.daily_logs[:10]
                     weight_df = pd.DataFrame(st.session_state.weight_data_list)
                     _, slope = get_prediction(weight_df)
-                    history_str = "\n".join([f"- {l['log_date']}: 饮食[{l.get('diet_detail')}] 运动[{l['sports']}]" for l in history_logs])
-                    system_prompt = f"你是理科伴侣小耗子。小夏在用氯氮平减重。历史数据：{history_str}\n当前体重斜率：{slope:.3f}"
+                    
+                    # 提取过去 10 天的碎碎念
+                    thoughts_str = "\n".join([f"- {l['log_date']} ({l['mood']}): {l['detail']}" for l in history_logs if l['detail']])
+                    history_str = "\n".join([f"- {l['log_date']}: 饮食[{l.get('diet_detail')}] 运动[{l['sports']}] 排便[{l['is_poop']}]" for l in history_logs])
+                    
+                    system_prompt = f"""
+                    你是理科伴侣小耗子。小夏正在服用【氯氮平】，目标是减重和保持健康。
+                    当前体重斜率：{slope:.3f} kg/d。
+                    
+                    请基于以下数据生成报告：
+                    1. 数据分析：针对饮食、运动、排便给出理科生的硬核建议。
+                    2. 💖 小耗子的贴心话：这是最关键的部分。请阅读以下小夏最近的碎碎念：
+                    {thoughts_str}
+                    请针对这些心情，以伴侣的身份给出温柔、坚定且充满支持的评论。不要只说官话，要像个懂她的理科男生一样，既讲道理也给拥抱。
+                    """
+                    
                     client = OpenAI(api_key=api_key_input, base_url="https://api.deepseek.com")
-                    response = client.chat.completions.create(model="deepseek-chat", messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": "请提供报告。"}] )
+                    response = client.chat.completions.create(
+                        model="deepseek-chat", 
+                        messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": "请分析近期的记录并回复我的碎碎念。"}] 
+                    )
                     st.session_state.chat_history = [{"role": "assistant", "content": response.choices[0].message.content}]
-        
+                    st.rerun()
+
         st.markdown("---")
-        chat_container = st.container(height=500)
+        chat_container = st.container(height=600)
         with chat_container:
             for m in st.session_state.chat_history:
-                with st.chat_message(m["role"], avatar="🐭" if m["role"]=="assistant" else "🌸"):
+                avatar = "🐭" if m["role"]=="assistant" else "🌸"
+                with st.chat_message(m["role"], avatar=avatar):
                     st.markdown(m["content"])
-        if prompt := st.chat_input("你想追问小耗子什么？"):
+        
+        if prompt := st.chat_input("你想对小耗子说什么？"):
             st.session_state.chat_history.append({"role": "user", "content": prompt})
+            client = OpenAI(api_key=api_key_input, base_url="https://api.deepseek.com")
+            chat_response = client.chat.completions.create(
+                model="deepseek-chat",
+                messages=[{"role": "system", "content": "你是懂药理、爱小夏的理科伴侣小耗子。"}] + st.session_state.chat_history
+            )
+            st.session_state.chat_history.append({"role": "assistant", "content": chat_response.choices[0].message.content})
             st.rerun()
 
-# --- Tab 2/3/4 保持原有代码即可 ---
+# --- Tab 2/3/4 部分保持原样 ---
 with tab2:
     if current_user == "小夏":
         st.markdown("### 📉 减脂美学：目标 55.0 kg")
@@ -262,3 +275,21 @@ with tab2:
 
 with tab3:
     st.image("https://images.unsplash.com/photo-1540959733332-eab4deabeeaf?auto=format&fit=crop&w=1200&q=80", caption="2026, 重逢在东京", use_container_width=True)
+
+with tab4:
+    st.markdown("## 📟 2026 跨年信箱")
+    auth_code = st.text_input("输入 Access Code：", type="password", key="final_auth")
+    if auth_code == "wwhaxxy1314":
+        st.balloons()
+        letter_content = """
+        <div class="diary-card" style="line-height: 1.8; letter-spacing: 1px;">
+            <h3 style='text-align: left !important;'>🌸 宝儿：</h3>
+            <p><b>跨年快乐！</b></p>
+            <p>再过一天，就是我们的一周年纪念日了...</p>
+            <div style="text-align: right; margin-top: 20px;">
+                <b>—— [运维负责人: 小耗子 🐭]</b><br>
+                <i>2025/12/31</i>
+            </div>
+        </div>
+        """
+        st.markdown(letter_content, unsafe_allow_html=True)
