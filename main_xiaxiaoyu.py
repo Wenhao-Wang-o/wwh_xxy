@@ -28,7 +28,7 @@ def load_all_data(user):
         st.session_state.daily_logs = l_res.data
     except Exception as e: st.error(f"加载失败: {e}")
 
-# --- 2. 工具函数 (天气/预测) ---
+# --- 2. 工具函数 ---
 def get_weather(city_pinyin):
     api_key = "3f4ff1ded1a1a5fc5335073e8cf6f722"
     url = f"http://api.openweathermap.org/data/2.5/weather?q={city_pinyin}&appid={api_key}&units=metric&lang=zh_cn"
@@ -87,39 +87,48 @@ with tab1:
     col_l, col_r = st.columns([1.8, 1.2])
     with col_l:
         st.subheader(f"📝 {current_user} 的深度记录")
+        
+        # 1. 运动项目选择（必须在表单外部以保证交互即时生效）
         selected_sports = st.multiselect("🏃 今日运动项目", ["呼啦圈", "散步", "羽毛球", "健身房", "拉伸", "俯卧撑"])
         
-        with st.form("master_diary_form_final_v2", clear_on_submit=True):
+        with st.form("master_diary_form_repaired", clear_on_submit=True):
             log_date = st.date_input("日期", datetime.date.today())
             
-            # --- 模块一：饮食与基本健康 ---
+            # --- 模块一：健康与饮食 ---
             st.markdown("### 🥗 健康与饮食")
             diet_detail = st.text_area("🍱 今日饮食明细") if current_user == "小夏" else ""
             diet_lv = st.select_slider("饮食控制等级", options=["放纵🍕", "正常🍚", "清淡🥗", "严格🥦"], value="正常🍚")
             
             is_poop, water, part_time = "N/A", 0.0, 0.0
-            col_health1, col_health2 = st.columns(2)
+            col_h1, col_h2 = st.columns(2)
             if current_user == "小夏":
-                is_poop = col_health1.radio("💩 今日排便情况", ["未排便", "顺利排便 ✅"], horizontal=True)
-                water = col_health2.slider("💧 饮水量 (L)", 0.5, 4.0, 2.0, 0.5)
+                is_poop = col_h1.radio("💩 今日排便情况", ["未排便", "顺利排便 ✅"], horizontal=True)
+                water = col_h2.slider("💧 饮水量 (L)", 0.5, 4.0, 2.0, 0.5)
             else:
-                # 修复点：确保小耗子的兼职时长正常显示
-                part_time = col_health1.number_input("⏳ 今日兼职时长 (小时)", 0.0, 14.0, 0.0, step=0.5)
+                part_time = col_h1.number_input("⏳ 今日兼职时长 (小时)", 0.0, 14.0, 0.0, step=0.5)
 
             st.divider()
 
-            # --- 模块二：运动详情 ---
-            st.markdown("### 🏃 运动详情")
-            push_cnt, sport_mins = 0, 0
+            # --- 模块二：运动详情 (核心修复点) ---
+            # 只有在选了运动后，才显示标题和具体的输入框
+            pushup_cnt = 0
+            sport_mins = 0
             has_pushup = "俯卧撑" in selected_sports
             has_others = any(s in selected_sports for s in ["呼啦圈", "散步", "羽毛球", "健身房", "拉伸"])
-            col_s1, col_s2 = st.columns(2)
-            if has_others: sport_mins = col_s1.slider("⏱️ 基础时长 (min)", 0, 180, 30)
-            if has_pushup: push_cnt = col_s2.number_input("💪 俯卧撑次数", 0, 1000, 30)
+            
+            if selected_sports:
+                st.markdown("### 🏃 运动详情")
+                col_s1, col_s2 = st.columns(2)
+                if has_others:
+                    sport_mins = col_s1.slider("⏱️ 基础运动时长 (分钟)", 0, 180, 30, step=5)
+                if has_pushup:
+                    pushup_cnt = col_s2.number_input("💪 俯卧撑总次数", min_value=0, value=30, step=5)
+            else:
+                st.info("💡 请先在上方选择运动项目以录入详情")
 
             st.divider()
 
-            # --- 模块三：学术与工作 ---
+            # --- 模块三：工作与学术 ---
             st.markdown("### 💻 工作与学术")
             work_items = st.multiselect("内容标签", ["看文献", "写论文", "找工作", "日常业务", "其他"])
             work_h = st.slider("⏳ 专注时长 (小时)", 0.0, 14.0, 4.0, step=0.5)
@@ -130,16 +139,17 @@ with tab1:
             # --- 模块四：心情与碎碎念 ---
             st.markdown("### ✨ 心情与碎碎念")
             mood_val = st.select_slider("今日心情", options=["😢", "😟", "😐", "😊", "🥰"], value="😊")
-            user_note = st.text_area("💌 备注/碎碎念", placeholder="今天的小确幸或是想对TA说的话...")
+            user_note = st.text_area("💌 备注/碎碎念", placeholder="今天有什么想对TA说的？")
 
             if st.form_submit_button("🚀 同步到云端"):
-                # 整合备注
-                final_detail = f"【💪 俯卧撑：{push_cnt}个】 {user_note}" if has_pushup else user_note
-                final_sport = float(sport_mins) if has_others else float(push_cnt)
+                # 拼接俯卧撑信息到备注
+                final_detail = f"【💪 俯卧撑：{pushup_cnt}个】 {user_note}" if has_pushup else user_note
+                # 存储数值逻辑
+                final_sport_val = float(sport_mins) if has_others else float(pushup_cnt)
                 
                 supabase.table("daily_logs").insert({
                     "user_name": current_user, "log_date": str(log_date), "sports": "|".join(selected_sports),
-                    "sport_minutes": final_sport, "diet": diet_lv, "diet_detail": diet_detail,
+                    "sport_minutes": final_sport_val, "diet": diet_lv, "diet_detail": diet_detail,
                     "is_poop": is_poop, "water": water, "work": "|".join(work_items), 
                     "academic_hours": float(work_h), "part_time_hours": float(part_time), 
                     "detail": final_detail, "mood": mood_val, "focus_level": work_focus
@@ -162,19 +172,16 @@ with tab1:
                         st.write(f"🏃 **运动:** {log['sports']} ({log['sport_minutes']}) | 💻 **学术:** {log.get('academic_hours')}h ({log.get('focus_level') or '专注'})")
                         st.markdown(f'<div class="diary-card">💌 碎碎念：<br>{log["detail"]}</div>', unsafe_allow_html=True)
                         
-                        # 显示小耗子的评论
-                        haozhi_reply = log.get('comment_from_haozhi')
-                        if haozhi_reply:
-                            st.markdown(f'<div class="comment-card">🐭 小耗子回应：<br>{haozhi_reply}</div>', unsafe_allow_html=True)
+                        reply = log.get('comment_from_haozhi')
+                        if reply:
+                            st.markdown(f'<div class="comment-card">🐭 小耗子回应：<br>{reply}</div>', unsafe_allow_html=True)
                     
                     with c2:
-                        # 小耗子对小夏的回复入口
                         if current_user == "小耗子" and log['user_name'] == "小夏":
                             ans_box = st.text_area("快速回复", key=f"ans_{log['id']}")
                             if st.button("💬 提交", key=f"b_{log['id']}"):
                                 supabase.table("daily_logs").update({"comment_from_haozhi": ans_box}).eq("id", log['id']).execute()
                                 st.rerun()
-                        # 只有本人可以删除
                         if current_user == log['user_name']:
                             if st.button("🗑️ 删除", key=f"d_{log['id']}"):
                                 supabase.table("daily_logs").delete().eq("id", log['id']).execute()
@@ -184,15 +191,18 @@ with tab1:
         st.markdown("### 🤖 智能深度审计")
         if st.button("🚀 生成小夏专项复盘报告", use_container_width=True):
             if api_key_input and st.session_state.daily_logs:
-                xia_logs = [l for l in st.session_state.daily_logs if l['user_name'] == "小夏"][:10]
-                history_str = "\n".join([f"- {l['log_date']}: 排便[{l['is_poop']}], 学术[{l.get('academic_hours')}h], 备注[{l['detail']}]" for l in xia_logs])
-                client = OpenAI(api_key=api_key_input, base_url="https://api.deepseek.com")
-                res = client.chat.completions.create(
-                    model="deepseek-chat", 
-                    messages=[{"role": "system", "content": "你是个温柔理性的理科男伴侣。"},{"role": "user", "content": f"分析以下数据并回应碎碎念：\n{history_str}"}]
-                )
-                st.session_state.chat_history = [{"role": "assistant", "content": res.choices[0].message.content}]
-                st.rerun()
+                with st.spinner("正在分析所有维度数据..."):
+                    xia_logs = [l for l in st.session_state.daily_logs if l['user_name'] == "小夏"][:10]
+                    weight_df = pd.DataFrame(st.session_state.weight_data_list)
+                    _, slope = get_prediction(weight_df)
+                    history_str = "\n".join([f"- {l['log_date']}: 状态[{l['mood']}], 排便[{l['is_poop']}], 学术[{l.get('academic_hours')}h], 备注[{l['detail']}]" for l in xia_logs])
+                    client = OpenAI(api_key=api_key_input, base_url="https://api.deepseek.com")
+                    res = client.chat.completions.create(
+                        model="deepseek-chat", 
+                        messages=[{"role": "system", "content": "你是个温柔理性的理科男伴侣。"},{"role": "user", "content": f"分析数据：\n{history_str}"}]
+                    )
+                    st.session_state.chat_history = [{"role": "assistant", "content": res.choices[0].message.content}]
+                    st.rerun()
         
         if "chat_history" in st.session_state:
             for m in st.session_state.chat_history:
@@ -250,6 +260,7 @@ with tab4:
         </div>
         """
         st.markdown(letter_content, unsafe_allow_html=True)
+
 
 
 
